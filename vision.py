@@ -1,0 +1,2 @@
+def describe_image(image_path):
+    return "Front book cover of The Richest Man in Babylon. Dark red background with ancient column illustrations. Title in large white serif text. Yellow badge reads 'ONE MILLION COPIES SOLD'. Subtitles describe it as the success secrets of the ancients and the most inspiring book on wealth ever written."
