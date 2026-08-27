@@ -1,24 +1,31 @@
 from config import retrieval_results, phrase_bonus, max_frequency_bonus, semantic_weight, keyword_weight, print_image_results,debug_keyword_results,debug_semantic_results,retrieval_candidate_pool
+from app.exceptions import RetrievalError
 from rank_bm25 import BM25Okapi
 
 
 
 
 def retrieve_chunks(question, search_all, selected_book, collection, ids, documents, metadatas, model):
-    question_embedding = model.encode(question).tolist()   #tolist converts the mumpy array to a python list
+    try:
+        question_embedding = model.encode(question).tolist()   
  
+    except Exception as e:
+        raise RetrievalError("Failed to generate query embedding") from e
 
+    
     question_words = question.lower().split()
 
     stop_words = {"the", "is", "a", "of", "in", "on", "at", "what", "who", "where", "when", "why", "how", "do", "does"}
 
     question_words = [word for word in question_words if word not in stop_words]
+    try:
+        tokenized_documents = [document.lower().split() for document in documents]
 
-    tokenized_documents = [document.lower().split() for document in documents]
+        bm25 = BM25Okapi(tokenized_documents)
 
-    bm25 = BM25Okapi(tokenized_documents)
-
-    bm25_scores = bm25.get_scores(question_words)
+        bm25_scores = bm25.get_scores(question_words)
+    except Exception as e:
+        raise RetrievalError("Keyword retrieval failed") from e
 
     top_bm25 = sorted(
     zip(bm25_scores, ids, documents, metadatas),
@@ -36,13 +43,15 @@ def retrieve_chunks(question, search_all, selected_book, collection, ids, docume
 
     print("Question:", question)
     print("Question words:", question_words)
-    
-    if search_all == "yes":
 
-        results = collection.query(query_embeddings=[question_embedding], n_results=retrieval_candidate_pool, include=["documents", "metadatas", "distances"])  #results stores what chromadb returns,q=q uses the users question to check
-    else:
-        results = collection.query(query_embeddings=[question_embedding], n_results=retrieval_candidate_pool, where={"source": selected_book}, include=["documents", "metadatas", "distances"]) 
+    try:
+        if search_all == "yes":
 
+            results = collection.query(query_embeddings=[question_embedding], n_results=retrieval_candidate_pool, include=["documents", "metadatas", "distances"])  #results stores what chromadb returns,q=q uses the users question to check
+        else:
+            results = collection.query(query_embeddings=[question_embedding], n_results=retrieval_candidate_pool, where={"source": selected_book}, include=["documents", "metadatas", "distances"]) 
+    except Exception as e:
+        raise RetrievalError("Vector database retrieval failed") from e
 
     retrieved_chunks = results["documents"][0]
 

@@ -2,7 +2,7 @@ from query_processor import route_question, decompose_question
 from retriever import retrieve_chunks
 from reranker import rerank_chunks
 from generator import generate_answer
-from config import retrieval_results
+from config import retrieval_results, llm_context_chunks
 
 
 def ask_question(question, search_all, selected_book, context):
@@ -60,10 +60,17 @@ def ask_question(question, search_all, selected_book, context):
         context.cross_encoder
     )
 
+    # Keep the top reranked retrieval results
     combined_chunks = combined_chunks[:retrieval_results]
 
-    context_text = "\n\n".join(combined_chunks)
+    # Send only the best chunks to the LLM
+    context_chunks = combined_chunks[:llm_context_chunks]
 
-    answer = generate_answer(question, context_text)
+    context_text = "\n\n".join(context_chunks)
+
+    answer = generate_answer(
+        question,
+        context_text
+    )
 
     return answer

@@ -18,3 +18,5 @@ venv/
 books/
 
 installed_packages.txt
+
+evaluation/benchmark_questions.txt
