@@ -19,9 +19,6 @@ RUN pip install --no-cache-dir \
 
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Hugging Face model cache
-
-RUN python -c "from sentence_transformers import SentenceTransformer, CrossEncoder; SentenceTransformer('all-MiniLM-L6-v2', device='cpu'); CrossEncoder('cross-encoder/ms-marco-TinyBERT-L2-v2')"
 
 
 # Runtime configuration
@@ -37,4 +34,4 @@ COPY . .
 
 EXPOSE 8000
 
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]
