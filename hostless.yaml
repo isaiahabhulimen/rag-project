@@ -1,9 +1,14 @@
 build:
   system: docker
+  min_cpu: 1
+  max_cpu: 2
+  min_memory: 2048
+  max_memory: 4096
 
 dockerfile_path: "./Dockerfile"
 
 working_directory: "/"
+
 build_context_directory: "/"
 
 scaling:
