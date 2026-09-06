@@ -1,27 +1,19 @@
 import hashlib
 import secrets
 
-from fastapi import Header, HTTPException
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from config import rag_api_key
 
 
+security = HTTPBearer()
+
+
 def verify_api_key(
-    authorization: str = Header(default=None)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
-    if not authorization:
-        raise HTTPException(
-            status_code=401,
-            detail="Missing authentication credentials"
-        )
-
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid authentication scheme"
-        )
-
-    provided_key = authorization.split(" ", 1)[1]
+    provided_key = credentials.credentials
 
     if not secrets.compare_digest(
         provided_key,

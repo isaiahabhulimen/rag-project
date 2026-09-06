@@ -84,7 +84,7 @@ elif mode =="1":
 
             break      
 
-   #hybrid step one
+
         answer = ask_question(
             question=question,
             search_all=search_all,
