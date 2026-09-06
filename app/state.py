@@ -1,14 +1,8 @@
 import chromadb
 
 from models import model, cross_encoder
-
 from config import collection_name
-
 from app.context import AppContext
-
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-from indexer import index_books
 
 
 client = chromadb.PersistentClient(path="database")
@@ -23,26 +17,10 @@ image_collection = client.get_or_create_collection(
 )
 
 
-splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000,
-    chunk_overlap=200
-)
-
-
-index_books(
-    text_collection,
-    image_collection,
-    model,
-    splitter
-)
-
-
 all_documents = text_collection.get()
 
 ids = all_documents["ids"]
-
 documents = all_documents["documents"]
-
 metadatas = all_documents["metadatas"]
 
 
