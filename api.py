@@ -1,7 +1,20 @@
-from fastapi import FastAPI, HTTPException, Depends
+import os
+import tempfile
+import uuid
+
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    Depends,
+    UploadFile,
+    File
+)
 from fastapi.responses import JSONResponse
 
-from app.exceptions import LLMError, RetrievalError
+from app.exceptions import (
+    LLMError,
+    RetrievalError
+)
 from app.schemas import (
     QuestionRequest,
     QuestionResponse,
@@ -13,9 +26,18 @@ from app.state import app_context
 from logger import logger
 from app.auth import verify_api_key
 from app.rate_limiter import check_rate_limit
+from storage import ObjectStorage
+from app.book_jobs import (
+    create_job,
+    get_job,
+    update_job
+)
+from config import worker_token
 
 
 app = FastAPI()
+
+storage = ObjectStorage()
 
 
 @app.exception_handler(LLMError)
@@ -23,6 +45,7 @@ def llm_error_handler(request, exc):
     logger.error(
         f"LLM error: {str(exc)}"
     )
+
     return JSONResponse(
         status_code=502,
         content={
@@ -37,6 +60,7 @@ def retrieval_error_handler(request, exc):
         f"Retrieval error: {str(exc)} | "
         f"Cause: {repr(exc.__cause__)}"
     )
+
     return JSONResponse(
         status_code=503,
         content={
@@ -77,6 +101,7 @@ def health():
         logger.error(
             f"Health check failed: {str(e)}"
         )
+
         raise HTTPException(
             status_code=503,
             detail="Service unavailable"
@@ -89,7 +114,9 @@ def health():
 )
 def ask(
     request: QuestionRequest,
-    authenticated: str = Depends(verify_api_key)
+    authenticated: str = Depends(
+        verify_api_key
+    )
 ):
     logger.info(
         f"Question received | "
@@ -117,4 +144,235 @@ def ask(
     return {
         "question": request.question,
         "answer": answer
+    }
+
+
+@app.post("/books/upload")
+def upload_book(
+    file: UploadFile = File(...),
+    authenticated: str = Depends(
+        verify_api_key
+    )
+):
+    if not file.filename:
+        raise HTTPException(
+            status_code=400,
+            detail="Filename is required"
+        )
+
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF files are supported"
+        )
+
+    job_id = str(uuid.uuid4())
+
+    object_key = (
+        f"books/{job_id}/"
+        f"{file.filename}"
+    )
+
+    temp_path = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=".pdf"
+        ) as temp_file:
+
+            temp_path = temp_file.name
+
+            while True:
+                chunk = file.file.read(
+                    1024 * 1024
+                )
+
+                if not chunk:
+                    break
+
+                temp_file.write(chunk)
+
+        storage.upload_file(
+            temp_path,
+            object_key
+        )
+
+        job = create_job(
+            filename=file.filename,
+            object_key=object_key,
+            job_id=job_id
+        )
+
+        logger.info(
+            f"Book queued | "
+            f"job_id={job_id} | "
+            f"filename={file.filename}"
+        )
+
+        return {
+            "job_id": job_id,
+            "filename": file.filename,
+            "status": "queued"
+        }
+
+    except Exception as e:
+        logger.error(
+            f"Book upload failed | "
+            f"job_id={job_id} | "
+            f"error={str(e)}"
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Book upload failed"
+        )
+
+    finally:
+        if temp_path and os.path.exists(
+            temp_path
+        ):
+            os.remove(temp_path)
+
+
+@app.get("/books/{job_id}")
+def book_status(
+    job_id: str,
+    authenticated: str = Depends(
+        verify_api_key
+    )
+):
+    job = get_job(job_id)
+
+    if not job:
+        raise HTTPException(
+            status_code=404,
+            detail="Job not found"
+        )
+
+    return job
+
+
+@app.post("/internal/index-batch")
+def index_batch(
+    payload: dict
+):
+    if not worker_token:
+        raise HTTPException(
+            status_code=503,
+            detail="Worker authentication is not configured"
+        )
+
+    token = payload.get("worker_token")
+
+    if token != worker_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid worker credentials"
+        )
+
+    book_name = payload.get("book_name")
+    file_hash = payload.get("file_hash")
+    batch_type = payload.get("batch_type")
+    items = payload.get("items", [])
+
+    if not book_name:
+        raise HTTPException(
+            status_code=400,
+            detail="book_name is required"
+        )
+
+    if not file_hash:
+        raise HTTPException(
+            status_code=400,
+            detail="file_hash is required"
+        )
+
+    if batch_type not in {
+        "text",
+        "image"
+    }:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid batch_type"
+        )
+
+    if not items:
+        return {
+            "status": "accepted",
+            "count": 0
+        }
+
+    collection = (
+        app_context.text_collection
+        if batch_type == "text"
+        else app_context.image_collection
+    )
+
+    collection.add(
+        ids=[
+            item["id"]
+            for item in items
+        ],
+        documents=[
+            item["document"]
+            for item in items
+        ],
+        embeddings=[
+            item["embedding"]
+            for item in items
+        ],
+        metadatas=[
+            item["metadata"]
+            for item in items
+        ]
+    )
+
+    logger.info(
+        f"Index batch stored | "
+        f"book={book_name} | "
+        f"type={batch_type} | "
+        f"count={len(items)}"
+    )
+
+    return {
+        "status": "accepted",
+        "count": len(items)
+    }
+
+
+@app.delete("/internal/index/{book_name}")
+def delete_book_index(
+    book_name: str,
+    payload: dict
+):
+    if not worker_token:
+        raise HTTPException(
+            status_code=503,
+            detail="Worker authentication is not configured"
+        )
+
+    token = payload.get("worker_token")
+
+    if token != worker_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid worker credentials"
+        )
+
+    app_context.text_collection.delete(
+        where={"source": book_name}
+    )
+
+    app_context.image_collection.delete(
+        where={"source": book_name}
+    )
+
+    logger.info(
+        f"Book index deleted | "
+        f"book={book_name}"
+    )
+
+    return {
+        "status": "deleted"
     }

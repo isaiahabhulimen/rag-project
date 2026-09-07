@@ -6,21 +6,22 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-
+# -------------------------
 # Secrets
+# -------------------------
+
+rag_api_key = os.getenv(
+    "RAG_API_KEY"
+)
+
+worker_token = os.getenv(
+    "WORKER_TOKEN"
+)
 
 
-rag_api_key = os.getenv("RAG_API_KEY")
-
-if not rag_api_key:
-    raise RuntimeError(
-        "RAG_API_KEY environment variable is not configured"
-    )
-
-
-
+# -------------------------
 # LLM configuration
-
+# -------------------------
 
 llm_backend = os.getenv(
     "LLM_BACKEND",
@@ -32,17 +33,14 @@ llm_name = os.getenv(
     "openai/gpt-oss-120b"
 )
 
-groq_api_key = os.getenv("GROQ_API_KEY")
-
-if llm_backend == "groq" and not groq_api_key:
-    raise RuntimeError(
-        "GROQ_API_KEY environment variable is not configured"
-    )
+groq_api_key = os.getenv(
+    "GROQ_API_KEY"
+)
 
 
-
+# -------------------------
 # Storage configuration
-
+# -------------------------
 
 database_path = os.getenv(
     "DATABASE_PATH",
@@ -55,9 +53,58 @@ book_folder = os.getenv(
 )
 
 
+# -------------------------
+# Object storage
+# -------------------------
 
+storage_bucket = os.getenv(
+    "BUCKET"
+)
+
+storage_endpoint = os.getenv(
+    "ENDPOINT"
+)
+
+storage_access_key = os.getenv(
+    "ACCESS_KEY_ID"
+)
+
+storage_secret_key = os.getenv(
+    "SECRET_ACCESS_KEY"
+)
+
+storage_region = os.getenv(
+    "REGION"
+)
+
+
+# -------------------------
+# Worker configuration
+# -------------------------
+
+worker_api_url = os.getenv(
+    "WORKER_API_URL",
+    "http://rag-project.railway.internal:8000"
+)
+
+worker_poll_seconds = int(
+    os.getenv(
+        "WORKER_POLL_SECONDS",
+        "10"
+    )
+)
+
+worker_stale_minutes = int(
+    os.getenv(
+        "WORKER_STALE_MINUTES",
+        "30"
+    )
+)
+
+
+# -------------------------
 # Model configuration
-
+# -------------------------
 
 model_name = os.getenv(
     "EMBEDDING_MODEL",
@@ -70,9 +117,9 @@ cross_encoder_name = os.getenv(
 )
 
 
-
+# -------------------------
 # RAG configuration
-
+# -------------------------
 
 collection_name = os.getenv(
     "COLLECTION_NAME",
@@ -110,9 +157,9 @@ min_chunk_characters = 300
 max_chunk_characters = 1200
 
 
-
+# -------------------------
 # Debug settings
-
+# -------------------------
 
 print_image_results = False
 

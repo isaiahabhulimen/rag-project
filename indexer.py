@@ -3,385 +3,337 @@ import time
 
 import pdfplumber
 
-from utils import get_file_hash
 from config import (
     embedding_batch_size,
-    book_folder,
     semantic_chunk_threshold,
     min_chunk_characters,
     max_chunk_characters,
 )
+
 from preprocessor import clean_text
-from vision import describe_image
 from semantic_chunker import semantic_chunk
+from utils import get_file_hash
+from vision import describe_image
 
 
-def index_books(text_collection, image_collection, model, splitter):
-    book_files = os.listdir(book_folder)
+def index_book(
+    pdf_path,
+    book_name,
+    job_id,
+    model,
+    store_batch
+):
+    print(
+        f"\n===== Processing: {book_name} ====="
+    )
 
-    print(book_files)
+    file_hash = get_file_hash(
+        pdf_path
+    )
 
-    for book_name in book_files:
+    indexing_start = time.perf_counter()
 
-        if not book_name.endswith(".pdf"):
-            continue
+    text_batch = []
+    image_batch = []
 
-        pdf_path = os.path.join(book_folder, book_name)
+    text_index = 0
+    image_index = 0
+    image_file_index = 0
 
-        print(f"\n===== Processing: {book_name} =====")
+    total_text_chunks = 0
+    total_image_chunks = 0
 
-        file_hash = get_file_hash(pdf_path)
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
 
-        existing_book = text_collection.get(
-            where={"source": book_name}
-        )
+            for page_number, page in enumerate(
+                pdf.pages,
+                start=1
+            ):
+                # -------------------------
+                # TEXT PROCESSING
+                # -------------------------
 
-        stored_hash = (
-            existing_book["metadatas"][0]["file_hash"]
-            if existing_book["ids"]
-            else None
-        )
+                raw_text = page.extract_text()
 
-        print(stored_hash)
-
-        if existing_book["ids"]:
-
-            if stored_hash == file_hash:
-                print("Book unchanged, skipping indexing")
-                continue
-
-            print("Book has changed. Updating index...")
-
-            text_collection.delete(
-                where={"source": book_name}
-            )
-
-            image_collection.delete(
-                where={"source": book_name}
-            )
-
-        indexing_start = time.perf_counter()
-
-        text_batch = []
-        image_batch = []
-
-        text_index = 0
-        image_index = 0
-
-        total_text_chunks = 0
-        total_image_chunks = 0
-
-        try:
-
-            with pdfplumber.open(pdf_path) as pdf:
-
-                for page_number, page in enumerate(
-                    pdf.pages,
-                    start=1
-                ):
-
-                    # -------------------------
-                    # TEXT PROCESSING
-                    # -------------------------
-
+                if raw_text:
                     page_text = clean_text(
-                        page.extract_text()
+                        raw_text
+                    )
+                else:
+                    page_text = ""
+
+                if page_text:
+                    page_chunks = semantic_chunk(
+                        page_text,
+                        model,
+                        semantic_chunk_threshold,
+                        min_chunk_characters,
+                        max_chunk_characters
                     )
 
-                    if page_text:
+                    for chunk in page_chunks:
+                        text_batch.append({
+                            "page": page_number,
+                            "text": chunk,
+                            "type": "text"
+                        })
 
-                        page_chunks = semantic_chunk(
-                            page_text,
-                            model,
-                            semantic_chunk_threshold,
-                            min_chunk_characters,
-                            max_chunk_characters
-                        )
+                        total_text_chunks += 1
 
-                        for chunk in page_chunks:
-
-                            text_batch.append({
-                                "page": page_number,
-                                "text": chunk,
-                                "type": "text"
-                            })
-
-                            total_text_chunks += 1
-
-                            if len(text_batch) >= embedding_batch_size:
-
-                                text_index = _store_text_batch(
-                                    text_collection,
-                                    model,
-                                    text_batch,
-                                    book_name,
-                                    file_hash,
-                                    text_index
-                                )
-
-                                text_batch = []
-
-                                print(
-                                    f"> Indexed "
-                                    f"{total_text_chunks} text chunks"
-                                )
-
-                    # -------------------------
-                    # IMAGE PROCESSING
-                    # -------------------------
-
-                    for img_data in page.images:
-
-                        img_path = (
-                            f"temp_img_{book_name}_"
-                            f"{page_number}_"
-                            f"{image_index}.png"
-                        )
-
-                        try:
-
-                            img_bytes = (
-                                img_data["stream"].get_data()
+                        if (
+                            len(text_batch)
+                            >= embedding_batch_size
+                        ):
+                            text_index = _store_text_batch(
+                                text_batch,
+                                model,
+                                book_name,
+                                job_id,
+                                file_hash,
+                                text_index,
+                                store_batch
                             )
 
-                            with open(
-                                img_path,
-                                "wb"
-                            ) as img_file:
+                            text_batch = []
 
-                                img_file.write(img_bytes)
+                # -------------------------
+                # IMAGE PROCESSING
+                # -------------------------
 
-                            description = describe_image(
-                                img_path
+                for image_data in page.images:
+
+                    image_path = (
+                        f"temp_img_"
+                        f"{job_id}_"
+                        f"{page_number}_"
+                        f"{image_file_index}.png"
+                    )
+
+                    image_file_index += 1
+
+                    try:
+                        image_bytes = (
+                            image_data["stream"]
+                            .get_data()
+                        )
+
+                        with open(
+                            image_path,
+                            "wb"
+                        ) as image_file:
+                            image_file.write(
+                                image_bytes
                             )
 
-                            image_batch.append({
-                                "page": page_number,
-                                "text": (
-                                    "[Image description: "
-                                    f"{description}]"
-                                ),
-                                "type": "image"
-                            })
+                        description = describe_image(
+                            image_path
+                        )
 
-                            total_image_chunks += 1
-                            image_index += 1
+                        image_batch.append({
+                            "page": page_number,
+                            "text": (
+                                "[Image description: "
+                                f"{description}]"
+                            ),
+                            "type": "image"
+                        })
 
-                            if (
-                                len(image_batch)
-                                >= embedding_batch_size
-                            ):
+                        total_image_chunks += 1
 
-                                image_index = _store_image_batch(
-                                    image_collection,
-                                    model,
-                                    image_batch,
-                                    book_name,
-                                    file_hash,
-                                    image_index
-                                )
+                        if (
+                            len(image_batch)
+                            >= embedding_batch_size
+                        ):
+                            image_index = _store_image_batch(
+                                image_batch,
+                                model,
+                                book_name,
+                                job_id,
+                                file_hash,
+                                image_index,
+                                store_batch
+                            )
 
-                                image_batch = []
+                            image_batch = []
 
-                                print(
-                                    f"> Indexed "
-                                    f"{total_image_chunks} "
-                                    f"image chunks"
-                                )
+                    finally:
+                        if os.path.exists(
+                            image_path
+                        ):
+                            os.remove(
+                                image_path
+                            )
 
-                        finally:
+        # -------------------------
+        # FINAL TEXT BATCH
+        # -------------------------
 
-                            if os.path.exists(img_path):
-                                os.remove(img_path)
-
-            # -------------------------
-            # FLUSH REMAINING TEXT
-            # -------------------------
-
-            if text_batch:
-
-                _store_text_batch(
-                    text_collection,
-                    model,
-                    text_batch,
-                    book_name,
-                    file_hash,
-                    text_index
-                )
-
-                print(
-                    f"> Indexed "
-                    f"{total_text_chunks} text chunks"
-                )
-
-            # -------------------------
-            # FLUSH REMAINING IMAGES
-            # -------------------------
-
-            if image_batch:
-
-                _store_image_batch(
-                    image_collection,
-                    model,
-                    image_batch,
-                    book_name,
-                    file_hash,
-                    image_index
-                )
-
-                print(
-                    f"> Indexed "
-                    f"{total_image_chunks} image chunks"
-                )
-
-            indexing_end = time.perf_counter()
-
-            indexing_time = (
-                indexing_end - indexing_start
+        if text_batch:
+            text_index = _store_text_batch(
+                text_batch,
+                model,
+                book_name,
+                job_id,
+                file_hash,
+                text_index,
+                store_batch
             )
 
-            print(
-                f"Indexed {total_text_chunks} "
-                f"text chunks and "
-                f"{total_image_chunks} image chunks"
+        # -------------------------
+        # FINAL IMAGE BATCH
+        # -------------------------
+
+        if image_batch:
+            image_index = _store_image_batch(
+                image_batch,
+                model,
+                book_name,
+                job_id,
+                file_hash,
+                image_index,
+                store_batch
             )
 
-            print(
-                f"Indexing completed in "
-                f"{indexing_time:.2f} seconds."
-            )
+        indexing_time = (
+            time.perf_counter()
+            - indexing_start
+        )
 
-        except Exception:
+        print(
+            f"Indexed {total_text_chunks} "
+            f"text chunks and "
+            f"{total_image_chunks} "
+            f"image chunks"
+        )
 
-            # Remove partially indexed data so that
-            # the next ingestion attempt can retry
-            # the book instead of treating it as complete.
+        print(
+            f"Indexing completed in "
+            f"{indexing_time:.2f} seconds."
+        )
 
-            print(
-                f"Indexing failed for {book_name}. "
-                "Removing partial index..."
-            )
+        return {
+            "file_hash": file_hash,
+            "text_chunks": total_text_chunks,
+            "image_chunks": total_image_chunks,
+            "indexing_time": indexing_time
+        }
 
-            text_collection.delete(
-                where={"source": book_name}
-            )
-
-            image_collection.delete(
-                where={"source": book_name}
-            )
-
-            raise
+    except Exception:
+        print(
+            f"Indexing failed for "
+            f"{book_name}"
+        )
+        raise
 
 
 def _store_text_batch(
-    collection,
-    model,
     batch,
+    model,
     book_name,
+    job_id,
     file_hash,
-    start_index
+    start_index,
+    store_batch
 ):
-
-    batch_texts = [
+    texts = [
         chunk["text"]
         for chunk in batch
     ]
 
     embeddings = model.encode(
-        batch_texts,
+        texts,
         batch_size=embedding_batch_size
     ).tolist()
 
-    ids = []
-    documents = []
-    metadatas = []
+    items = []
 
-    for offset, (chunk, embedding) in enumerate(
+    for offset, (
+        chunk,
+        embedding
+    ) in enumerate(
         zip(batch, embeddings)
     ):
-
         index = start_index + offset
 
-        ids.append(
-            f"{book_name}_text_{index}"
-        )
-
-        documents.append(
-            chunk["text"]
-        )
-
-        metadatas.append({
-            "page": chunk["page"],
-            "source": book_name,
-            "file_hash": file_hash,
-            "type": "text"
+        items.append({
+            "id": (
+                f"{book_name}_"
+                f"{job_id}_"
+                f"text_{index}"
+            ),
+            "document": chunk["text"],
+            "embedding": embedding,
+            "metadata": {
+                "page": chunk["page"],
+                "source": book_name,
+                "job_id": job_id,
+                "file_hash": file_hash,
+                "type": "text"
+            }
         })
 
-    collection.add(
-        ids=ids,
-        documents=documents,
-        embeddings=[
-            embedding
-            for embedding in embeddings
-        ],
-        metadatas=metadatas
+    store_batch(
+        "text",
+        book_name,
+        file_hash,
+        items
     )
 
     return start_index + len(batch)
 
 
 def _store_image_batch(
-    collection,
-    model,
     batch,
+    model,
     book_name,
+    job_id,
     file_hash,
-    start_index
+    start_index,
+    store_batch
 ):
-
-    batch_texts = [
+    texts = [
         chunk["text"]
         for chunk in batch
     ]
 
     embeddings = model.encode(
-        batch_texts,
+        texts,
         batch_size=embedding_batch_size
     ).tolist()
 
-    ids = []
-    documents = []
-    metadatas = []
+    items = []
 
-    for offset, (chunk, embedding) in enumerate(
+    for offset, (
+        chunk,
+        embedding
+    ) in enumerate(
         zip(batch, embeddings)
     ):
-
         index = start_index + offset
 
-        ids.append(
-            f"{book_name}_image_{index}"
-        )
-
-        documents.append(
-            chunk["text"]
-        )
-
-        metadatas.append({
-            "page": chunk["page"],
-            "source": book_name,
-            "file_hash": file_hash,
-            "type": "image"
+        items.append({
+            "id": (
+                f"{book_name}_"
+                f"{job_id}_"
+                f"image_{index}"
+            ),
+            "document": chunk["text"],
+            "embedding": embedding,
+            "metadata": {
+                "page": chunk["page"],
+                "source": book_name,
+                "job_id": job_id,
+                "file_hash": file_hash,
+                "type": "image"
+            }
         })
 
-    collection.add(
-        ids=ids,
-        documents=documents,
-        embeddings=[
-            embedding
-            for embedding in embeddings
-        ],
-        metadatas=metadatas
+    store_batch(
+        "image",
+        book_name,
+        file_hash,
+        items
     )
 
     return start_index + len(batch)

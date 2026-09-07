@@ -6,7 +6,6 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from config import *
 from models import model,cross_encoder
 from utils import get_file_hash,diversify_chunks
-from indexer import index_books
 from retriever import retrieve_chunks
 from reranker import rerank_chunks
 from generator import generate_answer
@@ -34,9 +33,6 @@ image_collection = client.get_or_create_collection(name=f"{collection_name}_imag
 #create the chunking tool
 splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
 
-
-
-index_books(text_collection, image_collection, model, splitter)
 
 #fetch document (only from text collection)
 all_documents = text_collection.get()
