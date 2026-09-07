@@ -33,12 +33,14 @@ executor = ThreadPoolExecutor(max_workers=1)
 
 
 def run_indexing():
+
     indexing_status["status"] = "indexing"
     indexing_status["error"] = None
 
     logger.info("Book indexing started")
 
     try:
+
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap
@@ -65,6 +67,7 @@ def run_indexing():
         )
 
     except Exception as e:
+
         indexing_status["status"] = "failed"
         indexing_status["error"] = str(e)
 
@@ -75,6 +78,7 @@ def run_indexing():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+
     logger.info("FastAPI application starting")
 
     executor.submit(run_indexing)
@@ -91,16 +95,22 @@ app = FastAPI(lifespan=lifespan)
 
 @app.exception_handler(LLMError)
 def llm_error_handler(request, exc):
-    logger.error(f"LLM error: {str(exc)}")
+
+    logger.error(
+        f"LLM error: {str(exc)}"
+    )
 
     return JSONResponse(
         status_code=502,
-        content={"detail": "LLM service unavailable"}
+        content={
+            "detail": "LLM service unavailable"
+        }
     )
 
 
 @app.exception_handler(RetrievalError)
 def retrieval_error_handler(request, exc):
+
     logger.error(
         f"Retrieval error: {str(exc)} | "
         f"Cause: {repr(exc.__cause__)}"
@@ -108,21 +118,37 @@ def retrieval_error_handler(request, exc):
 
     return JSONResponse(
         status_code=503,
-        content={"detail": "Retrieval service unavailable"}
+        content={
+            "detail": "Retrieval service unavailable"
+        }
     )
 
 
-@app.get("/", response_model=RootResponse)
+@app.get(
+    "/",
+    response_model=RootResponse
+)
 def root():
-    return {"message": "RAG API is running."}
+
+    return {
+        "message": "RAG API is running."
+    }
 
 
-@app.get("/health", response_model=HealthResponse)
+@app.get(
+    "/health",
+    response_model=HealthResponse
+)
 def health():
+
     try:
-        document_count = app_context.text_collection.count()
+
+        document_count = (
+            app_context.text_collection.count()
+        )
 
         if indexing_status["status"] == "failed":
+
             raise HTTPException(
                 status_code=503,
                 detail="Book indexing failed"
@@ -132,6 +158,7 @@ def health():
             "status": "healthy",
             "database": "connected",
             "documents": document_count,
+            "indexing_status": indexing_status["status"],
             "embedding_model": "loaded",
             "cross_encoder": "loaded"
         }
@@ -140,6 +167,7 @@ def health():
         raise
 
     except Exception as e:
+
         logger.error(
             f"Health check failed: {str(e)}"
         )
@@ -158,27 +186,38 @@ def ask(
     request: QuestionRequest,
     authenticated: str = Depends(verify_api_key)
 ):
+
     logger.info(
         f"Question received | "
         f"length={len(request.question)}"
     )
 
     if not check_rate_limit(authenticated):
+
         raise HTTPException(
             status_code=429,
-            detail="Rate limit exceeded. Try again later."
+            detail="Rate limit exceeded. "
+                   "Try again later."
         )
 
     if indexing_status["status"] == "indexing":
+
         raise HTTPException(
             status_code=503,
-            detail="Book indexing is still in progress. Please try again shortly."
+            detail=(
+                "Book indexing is still in progress. "
+                "Please try again shortly."
+            )
         )
 
     if indexing_status["status"] == "failed":
+
         raise HTTPException(
             status_code=503,
-            detail="Book indexing failed. Please try again later."
+            detail=(
+                "Book indexing failed. "
+                "Please try again later."
+            )
         )
 
     answer = ask_question(
@@ -188,7 +227,9 @@ def ask(
         context=app_context
     )
 
-    logger.info("Answer generated successfully")
+    logger.info(
+        "Answer generated successfully"
+    )
 
     return {
         "question": request.question,
