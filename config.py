@@ -166,3 +166,5 @@ print_image_results = False
 debug_keyword_results = 10
 
 debug_semantic_results = 10
+
+persistence_batch_size = 64

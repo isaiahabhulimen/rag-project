@@ -1,10 +1,10 @@
 import os
 import time
-
 import pdfplumber
 
 from config import (
     embedding_batch_size,
+    persistence_batch_size,
     semantic_chunk_threshold,
     min_chunk_characters,
     max_chunk_characters,
@@ -36,6 +36,9 @@ def index_book(
     text_batch = []
     image_batch = []
 
+    text_persist_batch = []
+    image_persist_batch = []
+
     text_index = 0
     image_index = 0
     image_file_index = 0
@@ -46,10 +49,13 @@ def index_book(
     try:
         with pdfplumber.open(pdf_path) as pdf:
 
+            total_pages = len(pdf.pages)
+
             for page_number, page in enumerate(
                 pdf.pages,
                 start=1
             ):
+
                 # -------------------------
                 # TEXT PROCESSING
                 # -------------------------
@@ -64,6 +70,7 @@ def index_book(
                     page_text = ""
 
                 if page_text:
+
                     page_chunks = semantic_chunk(
                         page_text,
                         model,
@@ -73,6 +80,7 @@ def index_book(
                     )
 
                     for chunk in page_chunks:
+
                         text_batch.append({
                             "page": page_number,
                             "text": chunk,
@@ -81,21 +89,43 @@ def index_book(
 
                         total_text_chunks += 1
 
-                        if (
-                            len(text_batch)
-                            >= embedding_batch_size
-                        ):
-                            text_index = _store_text_batch(
+                        if len(text_batch) >= embedding_batch_size:
+
+                            items = _embed_text_batch(
                                 text_batch,
                                 model,
                                 book_name,
                                 job_id,
                                 file_hash,
-                                text_index,
-                                store_batch
+                                text_index
+                            )
+
+                            text_index += len(items)
+
+                            text_persist_batch.extend(
+                                items
                             )
 
                             text_batch = []
+
+                            if (
+                                len(text_persist_batch)
+                                >= persistence_batch_size
+                            ):
+                                store_batch(
+                                    "text",
+                                    book_name,
+                                    file_hash,
+                                    text_persist_batch
+                                )
+
+                                print(
+                                    f"Persisted text batch: "
+                                    f"{len(text_persist_batch)} chunks "
+                                    f"(through chunk {text_index})"
+                                )
+
+                                text_persist_batch = []
 
                 # -------------------------
                 # IMAGE PROCESSING
@@ -141,21 +171,43 @@ def index_book(
 
                         total_image_chunks += 1
 
-                        if (
-                            len(image_batch)
-                            >= embedding_batch_size
-                        ):
-                            image_index = _store_image_batch(
+                        if len(image_batch) >= embedding_batch_size:
+
+                            items = _embed_image_batch(
                                 image_batch,
                                 model,
                                 book_name,
                                 job_id,
                                 file_hash,
-                                image_index,
-                                store_batch
+                                image_index
+                            )
+
+                            image_index += len(items)
+
+                            image_persist_batch.extend(
+                                items
                             )
 
                             image_batch = []
+
+                            if (
+                                len(image_persist_batch)
+                                >= persistence_batch_size
+                            ):
+                                store_batch(
+                                    "image",
+                                    book_name,
+                                    file_hash,
+                                    image_persist_batch
+                                )
+
+                                print(
+                                    f"Persisted image batch: "
+                                    f"{len(image_persist_batch)} chunks "
+                                    f"(through chunk {image_index})"
+                                )
+
+                                image_persist_batch = []
 
                     finally:
                         if os.path.exists(
@@ -165,34 +217,98 @@ def index_book(
                                 image_path
                             )
 
+                # -------------------------
+                # PAGE PROGRESS
+                # -------------------------
+
+                elapsed = (
+                    time.perf_counter()
+                    - indexing_start
+                )
+
+                print(
+                    f"Page {page_number}/{total_pages} | "
+                    f"Text chunks: {total_text_chunks} | "
+                    f"Image chunks: {total_image_chunks} | "
+                    f"Elapsed: {elapsed:.2f}s"
+                )
+
         # -------------------------
-        # FINAL TEXT BATCH
+        # FINAL TEXT EMBEDDING BATCH
         # -------------------------
 
         if text_batch:
-            text_index = _store_text_batch(
+
+            items = _embed_text_batch(
                 text_batch,
                 model,
                 book_name,
                 job_id,
                 file_hash,
-                text_index,
-                store_batch
+                text_index
+            )
+
+            text_index += len(items)
+
+            text_persist_batch.extend(
+                items
             )
 
         # -------------------------
-        # FINAL IMAGE BATCH
+        # FINAL IMAGE EMBEDDING BATCH
         # -------------------------
 
         if image_batch:
-            image_index = _store_image_batch(
+
+            items = _embed_image_batch(
                 image_batch,
                 model,
                 book_name,
                 job_id,
                 file_hash,
-                image_index,
-                store_batch
+                image_index
+            )
+
+            image_index += len(items)
+
+            image_persist_batch.extend(
+                items
+            )
+
+        # -------------------------
+        # FINAL TEXT PERSISTENCE
+        # -------------------------
+
+        if text_persist_batch:
+
+            store_batch(
+                "text",
+                book_name,
+                file_hash,
+                text_persist_batch
+            )
+
+            print(
+                f"Persisted final text batch: "
+                f"{len(text_persist_batch)} chunks"
+            )
+
+        # -------------------------
+        # FINAL IMAGE PERSISTENCE
+        # -------------------------
+
+        if image_persist_batch:
+
+            store_batch(
+                "image",
+                book_name,
+                file_hash,
+                image_persist_batch
+            )
+
+            print(
+                f"Persisted final image batch: "
+                f"{len(image_persist_batch)} chunks"
             )
 
         indexing_time = (
@@ -220,21 +336,22 @@ def index_book(
         }
 
     except Exception:
+
         print(
             f"Indexing failed for "
             f"{book_name}"
         )
+
         raise
 
 
-def _store_text_batch(
+def _embed_text_batch(
     batch,
     model,
     book_name,
     job_id,
     file_hash,
-    start_index,
-    store_batch
+    start_index
 ):
     texts = [
         chunk["text"]
@@ -254,6 +371,7 @@ def _store_text_batch(
     ) in enumerate(
         zip(batch, embeddings)
     ):
+
         index = start_index + offset
 
         items.append({
@@ -273,24 +391,16 @@ def _store_text_batch(
             }
         })
 
-    store_batch(
-        "text",
-        book_name,
-        file_hash,
-        items
-    )
-
-    return start_index + len(batch)
+    return items
 
 
-def _store_image_batch(
+def _embed_image_batch(
     batch,
     model,
     book_name,
     job_id,
     file_hash,
-    start_index,
-    store_batch
+    start_index
 ):
     texts = [
         chunk["text"]
@@ -310,6 +420,7 @@ def _store_image_batch(
     ) in enumerate(
         zip(batch, embeddings)
     ):
+
         index = start_index + offset
 
         items.append({
@@ -329,11 +440,4 @@ def _store_image_batch(
             }
         })
 
-    store_batch(
-        "image",
-        book_name,
-        file_hash,
-        items
-    )
-
-    return start_index + len(batch)
+    return items
