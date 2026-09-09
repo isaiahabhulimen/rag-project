@@ -4,7 +4,6 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
-
 from datetime import datetime, timezone
 
 from sentence_transformers import SentenceTransformer
@@ -141,6 +140,45 @@ def is_stale(job):
     )
 
 
+def recover_processing_jobs_on_startup():
+    """
+    Recover jobs that were still marked as processing
+    when the previous worker stopped unexpectedly.
+
+    The checkpoint stored in the job determines where
+    indexing resumes.
+    """
+
+    jobs = list_jobs()
+
+    for job in jobs:
+
+        if job.get("status") != "processing":
+            continue
+
+        job_id = job["job_id"]
+
+        last_completed_page = job.get(
+            "last_completed_page",
+            0
+        )
+
+        print(
+            f"Recovering interrupted job on startup: "
+            f"{job_id}"
+        )
+
+        print(
+            f"Last completed page: "
+            f"{last_completed_page}"
+        )
+
+        update_job(
+            job_id,
+            "queued"
+        )
+
+
 def find_next_job():
     jobs = list_jobs()
 
@@ -150,6 +188,7 @@ def find_next_job():
             return job
 
         if is_stale(job):
+
             print(
                 f"Recovering stale job: "
                 f"{job['job_id']}"
@@ -190,7 +229,9 @@ def process_job(job):
     job = current_job
 
     book_name = job["filename"]
+
     object_key = job["object_key"]
+
     file_hash = job.get("file_hash")
 
     last_completed_page = job.get(
@@ -239,6 +280,7 @@ def process_job(job):
     )
 
     temp_path = None
+
     index_started = False
 
     try:
@@ -247,6 +289,7 @@ def process_job(job):
             delete=False,
             suffix=".pdf"
         ) as temp_file:
+
             temp_path = temp_file.name
 
         print(
@@ -259,6 +302,7 @@ def process_job(job):
         )
 
         if not file_hash:
+
             print(
                 "No stored file hash found. "
                 "Using PDF hash calculated during indexing."
@@ -279,6 +323,7 @@ def process_job(job):
             )
 
             index_started = True
+
             start_page = 1
 
         else:
@@ -312,6 +357,7 @@ def process_job(job):
             )
 
             if updated_job:
+
                 last_completed_page = (
                     updated_job[
                         "last_completed_page"
@@ -424,6 +470,7 @@ def process_job(job):
             temp_path
             and os.path.exists(temp_path)
         ):
+
             os.remove(
                 temp_path
             )
@@ -440,6 +487,10 @@ def main():
         f"{worker_poll_seconds} seconds"
     )
 
+    # Recover jobs left in "processing" state
+    # by an unexpected worker shutdown.
+    recover_processing_jobs_on_startup()
+
     while True:
 
         try:
@@ -447,9 +498,11 @@ def main():
             job = find_next_job()
 
             if job:
+
                 process_job(job)
 
             else:
+
                 time.sleep(
                     worker_poll_seconds
                 )
