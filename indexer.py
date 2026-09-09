@@ -1,5 +1,7 @@
 import os
+
 import time
+
 import pdfplumber
 
 from config import (
@@ -11,8 +13,11 @@ from config import (
 )
 
 from preprocessor import clean_text
+
 from semantic_chunker import semantic_chunk
+
 from utils import get_file_hash
+
 from vision import describe_image
 
 
@@ -21,7 +26,12 @@ def index_book(
     book_name,
     job_id,
     model,
-    store_batch
+    store_batch,
+    start_page=1,
+    text_index=0,
+    image_index=0,
+    checkpoint_callback=None,
+    checkpoint_interval=10
 ):
     print(
         f"\n===== Processing: {book_name} ====="
@@ -39,12 +49,10 @@ def index_book(
     text_persist_batch = []
     image_persist_batch = []
 
-    text_index = 0
-    image_index = 0
     image_file_index = 0
 
-    total_text_chunks = 0
-    total_image_chunks = 0
+    total_text_chunks = text_index
+    total_image_chunks = image_index
 
     try:
         with pdfplumber.open(pdf_path) as pdf:
@@ -55,6 +63,9 @@ def index_book(
                 pdf.pages,
                 start=1
             ):
+
+                if page_number < start_page:
+                    continue
 
                 # -------------------------
                 # TEXT PROCESSING
@@ -112,6 +123,7 @@ def index_book(
                                 len(text_persist_batch)
                                 >= persistence_batch_size
                             ):
+
                                 store_batch(
                                     "text",
                                     book_name,
@@ -143,6 +155,7 @@ def index_book(
                     image_file_index += 1
 
                     try:
+
                         image_bytes = (
                             image_data["stream"]
                             .get_data()
@@ -152,6 +165,7 @@ def index_book(
                             image_path,
                             "wb"
                         ) as image_file:
+
                             image_file.write(
                                 image_bytes
                             )
@@ -194,6 +208,7 @@ def index_book(
                                 len(image_persist_batch)
                                 >= persistence_batch_size
                             ):
+
                                 store_batch(
                                     "image",
                                     book_name,
@@ -210,9 +225,11 @@ def index_book(
                                 image_persist_batch = []
 
                     finally:
+
                         if os.path.exists(
                             image_path
                         ):
+
                             os.remove(
                                 image_path
                             )
@@ -233,107 +250,222 @@ def index_book(
                     f"Elapsed: {elapsed:.2f}s"
                 )
 
-        # -------------------------
-        # FINAL TEXT EMBEDDING BATCH
-        # -------------------------
+                # -------------------------
+                # CHECKPOINT
+                # -------------------------
 
-        if text_batch:
+                if (
+                    checkpoint_callback
+                    and page_number % checkpoint_interval == 0
+                ):
 
-            items = _embed_text_batch(
-                text_batch,
-                model,
-                book_name,
-                job_id,
-                file_hash,
-                text_index
-            )
+                    # Finish any remaining embedding batches
+                    # before declaring the checkpoint complete.
 
-            text_index += len(items)
+                    if text_batch:
 
-            text_persist_batch.extend(
-                items
-            )
+                        items = _embed_text_batch(
+                            text_batch,
+                            model,
+                            book_name,
+                            job_id,
+                            file_hash,
+                            text_index
+                        )
 
-        # -------------------------
-        # FINAL IMAGE EMBEDDING BATCH
-        # -------------------------
+                        text_index += len(items)
 
-        if image_batch:
+                        text_persist_batch.extend(
+                            items
+                        )
 
-            items = _embed_image_batch(
-                image_batch,
-                model,
-                book_name,
-                job_id,
-                file_hash,
-                image_index
-            )
+                        text_batch = []
 
-            image_index += len(items)
+                    if image_batch:
 
-            image_persist_batch.extend(
-                items
-            )
+                        items = _embed_image_batch(
+                            image_batch,
+                            model,
+                            book_name,
+                            job_id,
+                            file_hash,
+                            image_index
+                        )
 
-        # -------------------------
-        # FINAL TEXT PERSISTENCE
-        # -------------------------
+                        image_index += len(items)
 
-        if text_persist_batch:
+                        image_persist_batch.extend(
+                            items
+                        )
 
-            store_batch(
-                "text",
-                book_name,
-                file_hash,
-                text_persist_batch
+                        image_batch = []
+
+                    # Persist everything before checkpointing.
+
+                    if text_persist_batch:
+
+                        store_batch(
+                            "text",
+                            book_name,
+                            file_hash,
+                            text_persist_batch
+                        )
+
+                        print(
+                            f"Checkpoint text flush: "
+                            f"{len(text_persist_batch)} chunks"
+                        )
+
+                        text_persist_batch = []
+
+                    if image_persist_batch:
+
+                        store_batch(
+                            "image",
+                            book_name,
+                            file_hash,
+                            image_persist_batch
+                        )
+
+                        print(
+                            f"Checkpoint image flush: "
+                            f"{len(image_persist_batch)} chunks"
+                        )
+
+                        image_persist_batch = []
+
+                    # Only save the checkpoint after
+                    # all work for this boundary was persisted.
+
+                    checkpoint_callback(
+                        page_number,
+                        text_index,
+                        image_index
+                    )
+
+                    print(
+                        f"Checkpoint saved: "
+                        f"page {page_number}"
+                    )
+
+            # -------------------------
+            # FINAL TEXT EMBEDDING BATCH
+            # -------------------------
+
+            if text_batch:
+
+                items = _embed_text_batch(
+                    text_batch,
+                    model,
+                    book_name,
+                    job_id,
+                    file_hash,
+                    text_index
+                )
+
+                text_index += len(items)
+
+                text_persist_batch.extend(
+                    items
+                )
+
+            # -------------------------
+            # FINAL IMAGE EMBEDDING BATCH
+            # -------------------------
+
+            if image_batch:
+
+                items = _embed_image_batch(
+                    image_batch,
+                    model,
+                    book_name,
+                    job_id,
+                    file_hash,
+                    image_index
+                )
+
+                image_index += len(items)
+
+                image_persist_batch.extend(
+                    items
+                )
+
+            # -------------------------
+            # FINAL TEXT PERSISTENCE
+            # -------------------------
+
+            if text_persist_batch:
+
+                store_batch(
+                    "text",
+                    book_name,
+                    file_hash,
+                    text_persist_batch
+                )
+
+                print(
+                    f"Persisted final text batch: "
+                    f"{len(text_persist_batch)} chunks"
+                )
+
+            # -------------------------
+            # FINAL IMAGE PERSISTENCE
+            # -------------------------
+
+            if image_persist_batch:
+
+                store_batch(
+                    "image",
+                    book_name,
+                    file_hash,
+                    image_persist_batch
+                )
+
+                print(
+                    f"Persisted final image batch: "
+                    f"{len(image_persist_batch)} chunks"
+                )
+
+            # -------------------------
+            # FINAL CHECKPOINT
+            # -------------------------
+
+            if checkpoint_callback:
+
+                checkpoint_callback(
+                    total_pages,
+                    text_index,
+                    image_index
+                )
+
+                print(
+                    f"Checkpoint saved: "
+                    f"page {total_pages}"
+                )
+
+            indexing_time = (
+                time.perf_counter()
+                - indexing_start
             )
 
             print(
-                f"Persisted final text batch: "
-                f"{len(text_persist_batch)} chunks"
-            )
-
-        # -------------------------
-        # FINAL IMAGE PERSISTENCE
-        # -------------------------
-
-        if image_persist_batch:
-
-            store_batch(
-                "image",
-                book_name,
-                file_hash,
-                image_persist_batch
+                f"Indexed {text_index} "
+                f"text chunks and "
+                f"{image_index} "
+                f"image chunks"
             )
 
             print(
-                f"Persisted final image batch: "
-                f"{len(image_persist_batch)} chunks"
+                f"Indexing completed in "
+                f"{indexing_time:.2f} seconds."
             )
 
-        indexing_time = (
-            time.perf_counter()
-            - indexing_start
-        )
-
-        print(
-            f"Indexed {total_text_chunks} "
-            f"text chunks and "
-            f"{total_image_chunks} "
-            f"image chunks"
-        )
-
-        print(
-            f"Indexing completed in "
-            f"{indexing_time:.2f} seconds."
-        )
-
-        return {
-            "file_hash": file_hash,
-            "text_chunks": total_text_chunks,
-            "image_chunks": total_image_chunks,
-            "indexing_time": indexing_time
-        }
+            return {
+                "file_hash": file_hash,
+                "text_chunks": text_index,
+                "image_chunks": image_index,
+                "indexing_time": indexing_time
+            }
 
     except Exception:
 
@@ -353,6 +485,7 @@ def _embed_text_batch(
     file_hash,
     start_index
 ):
+
     texts = [
         chunk["text"]
         for chunk in batch
@@ -402,6 +535,7 @@ def _embed_image_batch(
     file_hash,
     start_index
 ):
+
     texts = [
         chunk["text"]
         for chunk in batch

@@ -1,5 +1,7 @@
 import os
+
 import tempfile
+
 import uuid
 
 from fastapi import (
@@ -9,29 +11,39 @@ from fastapi import (
     UploadFile,
     File
 )
+
 from fastapi.responses import JSONResponse
 
 from app.exceptions import (
     LLMError,
     RetrievalError
 )
+
 from app.schemas import (
     QuestionRequest,
     QuestionResponse,
     RootResponse,
     HealthResponse,
 )
+
 from app.rag_service import ask_question
+
 from app.state import app_context
+
 from logger import logger
+
 from app.auth import verify_api_key
+
 from app.rate_limiter import check_rate_limit
+
 from storage import ObjectStorage
+
 from app.book_jobs import (
     create_job,
     get_job,
     update_job
 )
+
 from config import worker_token
 
 
@@ -309,35 +321,61 @@ def index_batch(
         else app_context.image_collection
     )
 
-    collection.add(
-        ids=[
-            item["id"]
-            for item in items
-        ],
-        documents=[
-            item["document"]
-            for item in items
-        ],
-        embeddings=[
-            item["embedding"]
-            for item in items
-        ],
-        metadatas=[
-            item["metadata"]
-            for item in items
-        ]
+    item_ids = [
+        item["id"]
+        for item in items
+    ]
+
+    existing = collection.get(
+        ids=item_ids
+    )
+
+    existing_ids = set(
+        existing.get("ids", [])
+    )
+
+    new_items = [
+        item
+        for item in items
+        if item["id"] not in existing_ids
+    ]
+
+    if new_items:
+        collection.add(
+            ids=[
+                item["id"]
+                for item in new_items
+            ],
+            documents=[
+                item["document"]
+                for item in new_items
+            ],
+            embeddings=[
+                item["embedding"]
+                for item in new_items
+            ],
+            metadatas=[
+                item["metadata"]
+                for item in new_items
+            ]
+        )
+
+    skipped_count = (
+        len(items) - len(new_items)
     )
 
     logger.info(
         f"Index batch stored | "
         f"book={book_name} | "
         f"type={batch_type} | "
-        f"count={len(items)}"
+        f"stored={len(new_items)} | "
+        f"already_exists={skipped_count}"
     )
 
     return {
         "status": "accepted",
-        "count": len(items)
+        "count": len(new_items),
+        "already_exists": skipped_count
     }
 
 

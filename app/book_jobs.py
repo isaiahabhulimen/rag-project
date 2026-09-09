@@ -1,4 +1,5 @@
 import uuid
+
 from datetime import datetime, timezone
 
 from storage import ObjectStorage
@@ -32,7 +33,10 @@ def create_job(
         "status": "queued",
         "created_at": _timestamp(),
         "updated_at": _timestamp(),
-        "error": None
+        "error": None,
+        "last_completed_page": 0,
+        "text_index": 0,
+        "image_index": 0
     }
 
     storage.put_json(
@@ -64,6 +68,30 @@ def update_job(
 
     job["status"] = status
     job["error"] = error
+    job["updated_at"] = _timestamp()
+
+    storage.put_json(
+        _job_key(job_id),
+        job
+    )
+
+    return job
+
+
+def update_checkpoint(
+    job_id,
+    last_completed_page,
+    text_index,
+    image_index
+):
+    job = get_job(job_id)
+
+    if not job:
+        return None
+
+    job["last_completed_page"] = last_completed_page
+    job["text_index"] = text_index
+    job["image_index"] = image_index
     job["updated_at"] = _timestamp()
 
     storage.put_json(
