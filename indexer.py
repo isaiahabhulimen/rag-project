@@ -1,5 +1,4 @@
 import os
-
 import time
 
 import pdfplumber
@@ -13,11 +12,8 @@ from config import (
 )
 
 from preprocessor import clean_text
-
 from semantic_chunker import semantic_chunk
-
 from utils import get_file_hash
-
 from vision import describe_image
 
 
@@ -33,6 +29,7 @@ def index_book(
     checkpoint_callback=None,
     checkpoint_interval=10
 ):
+
     print(
         f"\n===== Processing: {book_name} ====="
     )
@@ -55,9 +52,41 @@ def index_book(
     total_image_chunks = image_index
 
     try:
+
         with pdfplumber.open(pdf_path) as pdf:
 
             total_pages = len(pdf.pages)
+
+            print(
+                f"Total pages detected: "
+                f"{total_pages}"
+            )
+
+            if start_page > total_pages:
+
+                print(
+                    f"Start page {start_page} "
+                    f"is beyond the final page "
+                    f"{total_pages}."
+                )
+
+                if checkpoint_callback:
+
+                    checkpoint_callback(
+                        total_pages,
+                        text_index,
+                        image_index
+                    )
+
+                return {
+                    "file_hash": file_hash,
+                    "text_chunks": text_index,
+                    "image_chunks": image_index,
+                    "indexing_time": (
+                        time.perf_counter()
+                        - indexing_start
+                    )
+                }
 
             for page_number, page in enumerate(
                 pdf.pages,
@@ -100,7 +129,10 @@ def index_book(
 
                         total_text_chunks += 1
 
-                        if len(text_batch) >= embedding_batch_size:
+                        if (
+                            len(text_batch)
+                            >= embedding_batch_size
+                        ):
 
                             items = _embed_text_batch(
                                 text_batch,
@@ -185,7 +217,10 @@ def index_book(
 
                         total_image_chunks += 1
 
-                        if len(image_batch) >= embedding_batch_size:
+                        if (
+                            len(image_batch)
+                            >= embedding_batch_size
+                        ):
 
                             items = _embed_image_batch(
                                 image_batch,
@@ -229,7 +264,6 @@ def index_book(
                         if os.path.exists(
                             image_path
                         ):
-
                             os.remove(
                                 image_path
                             )
@@ -259,8 +293,7 @@ def index_book(
                     and page_number % checkpoint_interval == 0
                 ):
 
-                    # Finish any remaining embedding batches
-                    # before declaring the checkpoint complete.
+                    # Finish remaining embedding batches.
 
                     if text_batch:
 
@@ -334,8 +367,8 @@ def index_book(
 
                         image_persist_batch = []
 
-                    # Only save the checkpoint after
-                    # all work for this boundary was persisted.
+                    # Save checkpoint only after all work
+                    # for this boundary has been persisted.
 
                     checkpoint_callback(
                         page_number,

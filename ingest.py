@@ -4,21 +4,25 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
+
 from datetime import datetime, timezone
 
 from sentence_transformers import SentenceTransformer
+
 from app.book_jobs import (
     list_jobs,
     get_job,
     update_job,
     update_checkpoint
 )
+
 from config import (
     model_name,
     worker_api_url,
     worker_poll_seconds,
     worker_stale_minutes
 )
+
 from indexer import index_book
 from storage import ObjectStorage
 
@@ -156,15 +160,38 @@ def find_next_job():
                 "queued"
             )
 
+            refreshed_job = get_job(
+                job["job_id"]
+            )
+
+            if refreshed_job:
+                return refreshed_job
+
             return job
 
     return None
 
 
 def process_job(job):
+
     job_id = job["job_id"]
+
+    current_job = get_job(
+        job_id
+    )
+
+    if not current_job:
+        print(
+            f"Job no longer exists: "
+            f"{job_id}"
+        )
+        return
+
+    job = current_job
+
     book_name = job["filename"]
     object_key = job["object_key"]
+    file_hash = job.get("file_hash")
 
     last_completed_page = job.get(
         "last_completed_page",
@@ -190,6 +217,10 @@ def process_job(job):
     )
 
     print(
+        f"File hash: {file_hash}"
+    )
+
+    print(
         f"Last completed page: "
         f"{last_completed_page}"
     )
@@ -211,6 +242,7 @@ def process_job(job):
     index_started = False
 
     try:
+
         with tempfile.NamedTemporaryFile(
             delete=False,
             suffix=".pdf"
@@ -225,6 +257,12 @@ def process_job(job):
             object_key,
             temp_path
         )
+
+        if not file_hash:
+            print(
+                "No stored file hash found. "
+                "Using PDF hash calculated during indexing."
+            )
 
         if last_completed_page == 0:
 
@@ -241,7 +279,6 @@ def process_job(job):
             )
 
             index_started = True
-
             start_page = 1
 
         else:
@@ -262,12 +299,36 @@ def process_job(job):
             current_text_index,
             current_image_index
         ):
-            update_checkpoint(
+
+            nonlocal last_completed_page
+            nonlocal text_index
+            nonlocal image_index
+
+            updated_job = update_checkpoint(
                 job_id,
                 page_number,
                 current_text_index,
                 current_image_index
             )
+
+            if updated_job:
+                last_completed_page = (
+                    updated_job[
+                        "last_completed_page"
+                    ]
+                )
+
+                text_index = (
+                    updated_job[
+                        "text_index"
+                    ]
+                )
+
+                image_index = (
+                    updated_job[
+                        "image_index"
+                    ]
+                )
 
             print(
                 f"Checkpoint saved | "
@@ -363,7 +424,6 @@ def process_job(job):
             temp_path
             and os.path.exists(temp_path)
         ):
-
             os.remove(
                 temp_path
             )
@@ -383,6 +443,7 @@ def main():
     while True:
 
         try:
+
             job = find_next_job()
 
             if job:

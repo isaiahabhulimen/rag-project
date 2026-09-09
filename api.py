@@ -1,7 +1,6 @@
+import hashlib
 import os
-
 import tempfile
-
 import uuid
 
 from fastapi import (
@@ -11,44 +10,34 @@ from fastapi import (
     UploadFile,
     File
 )
-
 from fastapi.responses import JSONResponse
 
 from app.exceptions import (
     LLMError,
     RetrievalError
 )
-
 from app.schemas import (
     QuestionRequest,
     QuestionResponse,
     RootResponse,
     HealthResponse,
 )
-
 from app.rag_service import ask_question
-
 from app.state import app_context
-
 from logger import logger
-
 from app.auth import verify_api_key
-
 from app.rate_limiter import check_rate_limit
-
 from storage import ObjectStorage
-
 from app.book_jobs import (
     create_job,
     get_job,
-    update_job
+    update_job,
+    find_job_by_hash
 )
-
 from config import worker_token
 
 
 app = FastAPI()
-
 storage = ObjectStorage()
 
 
@@ -57,7 +46,6 @@ def llm_error_handler(request, exc):
     logger.error(
         f"LLM error: {str(exc)}"
     )
-
     return JSONResponse(
         status_code=502,
         content={
@@ -72,7 +60,6 @@ def retrieval_error_handler(request, exc):
         f"Retrieval error: {str(exc)} | "
         f"Cause: {repr(exc.__cause__)}"
     )
-
     return JSONResponse(
         status_code=503,
         content={
@@ -100,7 +87,6 @@ def health():
         document_count = (
             app_context.text_collection.count()
         )
-
         return {
             "status": "healthy",
             "database": "connected",
@@ -108,12 +94,10 @@ def health():
             "embedding_model": "loaded",
             "cross_encoder": "loaded"
         }
-
     except Exception as e:
         logger.error(
             f"Health check failed: {str(e)}"
         )
-
         raise HTTPException(
             status_code=503,
             detail="Service unavailable"
@@ -175,16 +159,10 @@ def upload_book(
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(
             status_code=400,
-            detail="Only PDF files are supported"
+            detail="Only PDFs are supported"
         )
 
     job_id = str(uuid.uuid4())
-
-    object_key = (
-        f"books/{job_id}/"
-        f"{file.filename}"
-    )
-
     temp_path = None
 
     try:
@@ -195,6 +173,8 @@ def upload_book(
 
             temp_path = temp_file.name
 
+            hasher = hashlib.sha256()
+
             while True:
                 chunk = file.file.read(
                     1024 * 1024
@@ -203,7 +183,59 @@ def upload_book(
                 if not chunk:
                     break
 
+                hasher.update(chunk)
                 temp_file.write(chunk)
+
+        file_hash = hasher.hexdigest()
+
+        existing_job = find_job_by_hash(
+            file_hash
+        )
+
+        if existing_job:
+            existing_status = existing_job.get(
+                "status"
+            )
+
+            if existing_status == "completed":
+                logger.info(
+                    f"Duplicate book upload skipped | "
+                    f"filename={file.filename} | "
+                    f"file_hash={file_hash} | "
+                    f"existing_job={existing_job['job_id']}"
+                )
+
+                return {
+                    "job_id": existing_job["job_id"],
+                    "filename": existing_job["filename"],
+                    "status": "completed",
+                    "already_indexed": True
+                }
+
+            if existing_status in {
+                "queued",
+                "processing",
+                "failed"
+            }:
+                logger.info(
+                    f"Existing book job found | "
+                    f"filename={file.filename} | "
+                    f"file_hash={file_hash} | "
+                    f"existing_job={existing_job['job_id']} | "
+                    f"status={existing_status}"
+                )
+
+                return {
+                    "job_id": existing_job["job_id"],
+                    "filename": existing_job["filename"],
+                    "status": existing_status,
+                    "already_indexed": False
+                }
+
+        object_key = (
+            f"books/{file_hash}/"
+            f"{file.filename}"
+        )
 
         storage.upload_file(
             temp_path,
@@ -213,19 +245,22 @@ def upload_book(
         job = create_job(
             filename=file.filename,
             object_key=object_key,
-            job_id=job_id
+            job_id=job_id,
+            file_hash=file_hash
         )
 
         logger.info(
             f"Book queued | "
             f"job_id={job_id} | "
-            f"filename={file.filename}"
+            f"filename={file.filename} | "
+            f"file_hash={file_hash}"
         )
 
         return {
             "job_id": job_id,
             "filename": file.filename,
-            "status": "queued"
+            "status": "queued",
+            "already_indexed": False
         }
 
     except Exception as e:
@@ -241,8 +276,9 @@ def upload_book(
         )
 
     finally:
-        if temp_path and os.path.exists(
+        if (
             temp_path
+            and os.path.exists(temp_path)
         ):
             os.remove(temp_path)
 

@@ -21,7 +21,8 @@ def _timestamp():
 def create_job(
     filename,
     object_key,
-    job_id=None
+    job_id=None,
+    file_hash=None
 ):
     if job_id is None:
         job_id = str(uuid.uuid4())
@@ -30,6 +31,7 @@ def create_job(
         "job_id": job_id,
         "filename": filename,
         "object_key": object_key,
+        "file_hash": file_hash,
         "status": "queued",
         "created_at": _timestamp(),
         "updated_at": _timestamp(),
@@ -89,7 +91,10 @@ def update_checkpoint(
     if not job:
         return None
 
-    job["last_completed_page"] = last_completed_page
+    job["last_completed_page"] = (
+        last_completed_page
+    )
+
     job["text_index"] = text_index
     job["image_index"] = image_index
     job["updated_at"] = _timestamp()
@@ -100,6 +105,32 @@ def update_checkpoint(
     )
 
     return job
+
+
+def find_job_by_hash(file_hash):
+    if not file_hash:
+        return None
+
+    jobs = list_jobs()
+
+    matching_jobs = [
+        job
+        for job in jobs
+        if job.get("file_hash") == file_hash
+    ]
+
+    if not matching_jobs:
+        return None
+
+    matching_jobs.sort(
+        key=lambda job: job.get(
+            "updated_at",
+            ""
+        ),
+        reverse=True
+    )
+
+    return matching_jobs[0]
 
 
 def list_jobs():
