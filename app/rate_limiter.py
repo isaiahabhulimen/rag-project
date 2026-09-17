@@ -1,7 +1,6 @@
 import time
 from collections import defaultdict
 
-
 REQUEST_LIMIT = 10
 WINDOW_SECONDS = 60
 

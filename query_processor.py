@@ -13,14 +13,7 @@ Question: {question}
 Classification:"""
 
     response = chat(
-        model=llm_name,
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        temperature=0
+        model=llm_name, messages=[{"role": "user", "content": prompt}], temperature=0
     )
 
     result = response.choices[0].message.content.strip().upper()
@@ -35,22 +28,15 @@ Question: {question}
 Sub-questions:"""
 
     response = chat(
-        model=llm_name,
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        temperature=0
+        model=llm_name, messages=[{"role": "user", "content": prompt}], temperature=0
     )
 
     raw = response.choices[0].message.content.strip()
-    
+
     sub_questions = []
     for line in raw.split("\n"):
         line = line.strip()
         if line and any(line.startswith(f"{i}.") for i in range(1, 10)):
             sub_questions.append(line.split(". ", 1)[-1])
-    
+
     return sub_questions if sub_questions else [question]

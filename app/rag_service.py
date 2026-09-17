@@ -24,7 +24,7 @@ def ask_question(question, search_all, selected_book, context):
                 context.ids,
                 context.documents,
                 context.metadatas,
-                context.model
+                context.model,
             )
 
             all_chunks.extend(combined_chunks)
@@ -50,14 +50,11 @@ def ask_question(question, search_all, selected_book, context):
             context.ids,
             context.documents,
             context.metadatas,
-            context.model
+            context.model,
         )
 
     combined_chunks = rerank_chunks(
-        question,
-        combined_chunks,
-        ranked_chunks,
-        context.cross_encoder
+        question, combined_chunks, ranked_chunks, context.cross_encoder
     )
 
     # Keep the top reranked retrieval results
@@ -68,9 +65,6 @@ def ask_question(question, search_all, selected_book, context):
 
     context_text = "\n\n".join(context_chunks)
 
-    answer = generate_answer(
-        question,
-        context_text
-    )
+    answer = generate_answer(question, context_text)
 
     return answer

@@ -15,7 +15,7 @@ def load_benchmark(file_name):
 
         if "question" not in record:
             raise ValueError("Invalid benchmark record: missing 'question'.")
-        
+
         if "expected_answer" not in record:
             raise ValueError("Invalid benchmark record: missing 'expected_answer'.")
     return benchmark

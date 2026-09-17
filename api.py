@@ -3,19 +3,10 @@ import os
 import tempfile
 import uuid
 
-from fastapi import (
-    FastAPI,
-    HTTPException,
-    Depends,
-    UploadFile,
-    File
-)
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
 from fastapi.responses import JSONResponse
 
-from app.exceptions import (
-    LLMError,
-    RetrievalError
-)
+from app.exceptions import LLMError, RetrievalError
 from app.schemas import (
     QuestionRequest,
     QuestionResponse,
@@ -28,14 +19,8 @@ from logger import logger
 from app.auth import verify_api_key
 from app.rate_limiter import check_rate_limit
 from storage import ObjectStorage
-from app.book_jobs import (
-    create_job,
-    get_job,
-    update_job,
-    find_job_by_hash
-)
+from app.book_jobs import create_job, get_job, update_job, find_job_by_hash
 from config import worker_token
-
 
 app = FastAPI()
 storage = ObjectStorage()
@@ -43,142 +28,82 @@ storage = ObjectStorage()
 
 @app.exception_handler(LLMError)
 def llm_error_handler(request, exc):
-    logger.error(
-        f"LLM error: {str(exc)}"
-    )
-    return JSONResponse(
-        status_code=502,
-        content={
-            "detail": "LLM service unavailable"
-        }
-    )
+    logger.error(f"LLM error: {str(exc)}")
+    return JSONResponse(status_code=502, content={"detail": "LLM service unavailable"})
 
 
 @app.exception_handler(RetrievalError)
 def retrieval_error_handler(request, exc):
-    logger.error(
-        f"Retrieval error: {str(exc)} | "
-        f"Cause: {repr(exc.__cause__)}"
-    )
+    logger.error(f"Retrieval error: {str(exc)} | " f"Cause: {repr(exc.__cause__)}")
     return JSONResponse(
-        status_code=503,
-        content={
-            "detail": "Retrieval service unavailable"
-        }
+        status_code=503, content={"detail": "Retrieval service unavailable"}
     )
 
 
-@app.get(
-    "/",
-    response_model=RootResponse
-)
+@app.get("/", response_model=RootResponse)
 def root():
-    return {
-        "message": "RAG API is running."
-    }
+    return {"message": "RAG API is running."}
 
 
-@app.get(
-    "/health",
-    response_model=HealthResponse
-)
+@app.get("/health", response_model=HealthResponse)
 def health():
     try:
-        document_count = (
-            app_context.text_collection.count()
-        )
+        document_count = app_context.text_collection.count()
         return {
             "status": "healthy",
             "database": "connected",
             "documents": document_count,
             "embedding_model": "loaded",
-            "cross_encoder": "loaded"
+            "cross_encoder": "loaded",
         }
     except Exception as e:
-        logger.error(
-            f"Health check failed: {str(e)}"
-        )
-        raise HTTPException(
-            status_code=503,
-            detail="Service unavailable"
-        )
+        logger.error(f"Health check failed: {str(e)}")
+        raise HTTPException(status_code=503, detail="Service unavailable")
 
 
-@app.post(
-    "/ask",
-    response_model=QuestionResponse
-)
-def ask(
-    request: QuestionRequest,
-    authenticated: str = Depends(
-        verify_api_key
-    )
-):
-    logger.info(
-        f"Question received | "
-        f"length={len(request.question)}"
-    )
+@app.post("/ask", response_model=QuestionResponse)
+def ask(request: QuestionRequest, authenticated: str = Depends(verify_api_key)):
+    logger.info(f"Question received | " f"length={len(request.question)}")
 
     if not check_rate_limit(authenticated):
         raise HTTPException(
-            status_code=429,
-            detail="Rate limit exceeded. "
-                   "Try again later."
+            status_code=429, detail="Rate limit exceeded. " "Try again later."
         )
 
     answer = ask_question(
         question=request.question,
         search_all="yes",
         selected_book=None,
-        context=app_context
+        context=app_context,
     )
 
-    logger.info(
-        "Answer generated successfully"
-    )
+    logger.info("Answer generated successfully")
 
-    return {
-        "question": request.question,
-        "answer": answer
-    }
+    return {"question": request.question, "answer": answer}
 
 
 @app.post("/books/upload")
 def upload_book(
-    file: UploadFile = File(...),
-    authenticated: str = Depends(
-        verify_api_key
-    )
+    file: UploadFile = File(...), authenticated: str = Depends(verify_api_key)
 ):
     if not file.filename:
-        raise HTTPException(
-            status_code=400,
-            detail="Filename is required"
-        )
+        raise HTTPException(status_code=400, detail="Filename is required")
 
     if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(
-            status_code=400,
-            detail="Only PDFs are supported"
-        )
+        raise HTTPException(status_code=400, detail="Only PDFs are supported")
 
     job_id = str(uuid.uuid4())
     temp_path = None
 
     try:
-        with tempfile.NamedTemporaryFile(
-            delete=False,
-            suffix=".pdf"
-        ) as temp_file:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
 
             temp_path = temp_file.name
 
             hasher = hashlib.sha256()
 
             while True:
-                chunk = file.file.read(
-                    1024 * 1024
-                )
+                chunk = file.file.read(1024 * 1024)
 
                 if not chunk:
                     break
@@ -188,14 +113,10 @@ def upload_book(
 
         file_hash = hasher.hexdigest()
 
-        existing_job = find_job_by_hash(
-            file_hash
-        )
+        existing_job = find_job_by_hash(file_hash)
 
         if existing_job:
-            existing_status = existing_job.get(
-                "status"
-            )
+            existing_status = existing_job.get("status")
 
             if existing_status == "completed":
                 logger.info(
@@ -209,14 +130,10 @@ def upload_book(
                     "job_id": existing_job["job_id"],
                     "filename": existing_job["filename"],
                     "status": "completed",
-                    "already_indexed": True
+                    "already_indexed": True,
                 }
 
-            if existing_status in {
-                "queued",
-                "processing",
-                "failed"
-            }:
+            if existing_status in {"queued", "processing", "failed"}:
                 logger.info(
                     f"Existing book job found | "
                     f"filename={file.filename} | "
@@ -229,24 +146,18 @@ def upload_book(
                     "job_id": existing_job["job_id"],
                     "filename": existing_job["filename"],
                     "status": existing_status,
-                    "already_indexed": False
+                    "already_indexed": False,
                 }
 
-        object_key = (
-            f"books/{file_hash}/"
-            f"{file.filename}"
-        )
+        object_key = f"books/{file_hash}/" f"{file.filename}"
 
-        storage.upload_file(
-            temp_path,
-            object_key
-        )
+        storage.upload_file(temp_path, object_key)
 
         job = create_job(
             filename=file.filename,
             object_key=object_key,
             job_id=job_id,
-            file_hash=file_hash
+            file_hash=file_hash,
         )
 
         logger.info(
@@ -260,64 +171,40 @@ def upload_book(
             "job_id": job_id,
             "filename": file.filename,
             "status": "queued",
-            "already_indexed": False
+            "already_indexed": False,
         }
 
     except Exception as e:
-        logger.error(
-            f"Book upload failed | "
-            f"job_id={job_id} | "
-            f"error={str(e)}"
-        )
+        logger.error(f"Book upload failed | " f"job_id={job_id} | " f"error={str(e)}")
 
-        raise HTTPException(
-            status_code=500,
-            detail="Book upload failed"
-        )
+        raise HTTPException(status_code=500, detail="Book upload failed")
 
     finally:
-        if (
-            temp_path
-            and os.path.exists(temp_path)
-        ):
+        if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
 
 
 @app.get("/books/{job_id}")
-def book_status(
-    job_id: str,
-    authenticated: str = Depends(
-        verify_api_key
-    )
-):
+def book_status(job_id: str, authenticated: str = Depends(verify_api_key)):
     job = get_job(job_id)
 
     if not job:
-        raise HTTPException(
-            status_code=404,
-            detail="Job not found"
-        )
+        raise HTTPException(status_code=404, detail="Job not found")
 
     return job
 
 
 @app.post("/internal/index-batch")
-def index_batch(
-    payload: dict
-):
+def index_batch(payload: dict):
     if not worker_token:
         raise HTTPException(
-            status_code=503,
-            detail="Worker authentication is not configured"
+            status_code=503, detail="Worker authentication is not configured"
         )
 
     token = payload.get("worker_token")
 
     if token != worker_token:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid worker credentials"
-        )
+        raise HTTPException(status_code=401, detail="Invalid worker credentials")
 
     book_name = payload.get("book_name")
     file_hash = payload.get("file_hash")
@@ -325,31 +212,16 @@ def index_batch(
     items = payload.get("items", [])
 
     if not book_name:
-        raise HTTPException(
-            status_code=400,
-            detail="book_name is required"
-        )
+        raise HTTPException(status_code=400, detail="book_name is required")
 
     if not file_hash:
-        raise HTTPException(
-            status_code=400,
-            detail="file_hash is required"
-        )
+        raise HTTPException(status_code=400, detail="file_hash is required")
 
-    if batch_type not in {
-        "text",
-        "image"
-    }:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid batch_type"
-        )
+    if batch_type not in {"text", "image"}:
+        raise HTTPException(status_code=400, detail="Invalid batch_type")
 
     if not items:
-        return {
-            "status": "accepted",
-            "count": 0
-        }
+        return {"status": "accepted", "count": 0}
 
     collection = (
         app_context.text_collection
@@ -357,48 +229,23 @@ def index_batch(
         else app_context.image_collection
     )
 
-    item_ids = [
-        item["id"]
-        for item in items
-    ]
+    item_ids = [item["id"] for item in items]
 
-    existing = collection.get(
-        ids=item_ids
-    )
+    existing = collection.get(ids=item_ids)
 
-    existing_ids = set(
-        existing.get("ids", [])
-    )
+    existing_ids = set(existing.get("ids", []))
 
-    new_items = [
-        item
-        for item in items
-        if item["id"] not in existing_ids
-    ]
+    new_items = [item for item in items if item["id"] not in existing_ids]
 
     if new_items:
         collection.add(
-            ids=[
-                item["id"]
-                for item in new_items
-            ],
-            documents=[
-                item["document"]
-                for item in new_items
-            ],
-            embeddings=[
-                item["embedding"]
-                for item in new_items
-            ],
-            metadatas=[
-                item["metadata"]
-                for item in new_items
-            ]
+            ids=[item["id"] for item in new_items],
+            documents=[item["document"] for item in new_items],
+            embeddings=[item["embedding"] for item in new_items],
+            metadatas=[item["metadata"] for item in new_items],
         )
 
-    skipped_count = (
-        len(items) - len(new_items)
-    )
+    skipped_count = len(items) - len(new_items)
 
     logger.info(
         f"Index batch stored | "
@@ -411,42 +258,26 @@ def index_batch(
     return {
         "status": "accepted",
         "count": len(new_items),
-        "already_exists": skipped_count
+        "already_exists": skipped_count,
     }
 
 
 @app.delete("/internal/index/{book_name}")
-def delete_book_index(
-    book_name: str,
-    payload: dict
-):
+def delete_book_index(book_name: str, payload: dict):
     if not worker_token:
         raise HTTPException(
-            status_code=503,
-            detail="Worker authentication is not configured"
+            status_code=503, detail="Worker authentication is not configured"
         )
 
     token = payload.get("worker_token")
 
     if token != worker_token:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid worker credentials"
-        )
+        raise HTTPException(status_code=401, detail="Invalid worker credentials")
 
-    app_context.text_collection.delete(
-        where={"source": book_name}
-    )
+    app_context.text_collection.delete(where={"source": book_name})
 
-    app_context.image_collection.delete(
-        where={"source": book_name}
-    )
+    app_context.image_collection.delete(where={"source": book_name})
 
-    logger.info(
-        f"Book index deleted | "
-        f"book={book_name}"
-    )
+    logger.info(f"Book index deleted | " f"book={book_name}")
 
-    return {
-        "status": "deleted"
-    }
+    return {"status": "deleted"}

@@ -8,4 +8,3 @@ class RetrievalError(RAGError):
 
 class LLMError(RAGError):
     """Raised when LLM generation fails."""
-    

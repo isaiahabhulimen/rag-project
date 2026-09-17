@@ -17,14 +17,7 @@ Generated Answer: {generated}
 """
 
     response = client.chat.completions.create(
-        model=llm_name,
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        temperature=0
+        model=llm_name, messages=[{"role": "user", "content": prompt}], temperature=0
     )
 
     return response.choices[0].message.content.strip().upper() == "YES"
@@ -42,9 +35,9 @@ def generate_report(eval_results, output_folder="reports"):
             "total": eval_results["total"],
             "passed": eval_results["passed"],
             "failed": eval_results["failed"],
-            "accuracy": eval_results["accuracy"]
+            "accuracy": eval_results["accuracy"],
         },
-        "results": eval_results["results"]
+        "results": eval_results["results"],
     }
 
     with open(report_path, "w", encoding="utf-8") as f:
@@ -62,7 +55,9 @@ def generate_report(eval_results, output_folder="reports"):
     return report_path
 
 
-def evaluate_rag(benchmark, collection, ids, documents, metadatas, model, cross_encoder):
+def evaluate_rag(
+    benchmark, collection, ids, documents, metadatas, model, cross_encoder
+):
     total = len(benchmark)
     passed = 0
     failed = 0
@@ -89,23 +84,25 @@ def evaluate_rag(benchmark, collection, ids, documents, metadatas, model, cross_
         else:
             failed += 1
 
-        results.append({
-            "question": question,
-            "expected_answer": expected_answer,
-            "generated_answer": generated_answer,
-            "passed": is_match
-        })
+        results.append(
+            {
+                "question": question,
+                "expected_answer": expected_answer,
+                "generated_answer": generated_answer,
+                "passed": is_match,
+            }
+        )
 
     accuracy = (passed / total) * 100 if total > 0 else 0
-    
+
     results_dict = {
         "total": total,
         "passed": passed,
         "failed": failed,
         "accuracy": accuracy,
-        "results": results
+        "results": results,
     }
-    
+
     generate_report(results_dict)
-    
+
     return results_dict

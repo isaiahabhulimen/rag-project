@@ -2,11 +2,6 @@ import hashlib
 from sentence_transformers.util import cos_sim
 
 
-
-
-
-
-
 def get_file_hash(pdf_path):
     with open(pdf_path, "rb") as file:
         file_bytes = file.read()
@@ -18,10 +13,11 @@ def get_file_hash(pdf_path):
 
     return file_hash
 
+
 def diversify_chunks(ranked_chunks, ranked_scores, model, top_k=5, lambda_value=0.7):
     if len(ranked_chunks) <= top_k:
         return ranked_chunks
-    
+
     chunk_embeddings = model.encode(ranked_chunks, convert_to_tensor=True)
     selected_chunks = [ranked_chunks[0]]
     selected_indices = [0]
@@ -38,12 +34,16 @@ def diversify_chunks(ranked_chunks, ranked_scores, model, top_k=5, lambda_value=
 
             max_similarity = 0
             for selected_index in selected_indices:
-                similarity = cos_sim(chunk_embeddings[candidate_index], chunk_embeddings[selected_index]).item()
+                similarity = cos_sim(
+                    chunk_embeddings[candidate_index], chunk_embeddings[selected_index]
+                ).item()
 
                 if similarity > max_similarity:
                     max_similarity = similarity
 
-            mmr_score = (lambda_value * relevance) - ((1 - lambda_value) * max_similarity)
+            mmr_score = (lambda_value * relevance) - (
+                (1 - lambda_value) * max_similarity
+            )
 
             if mmr_score > best_score:
                 best_score = mmr_score

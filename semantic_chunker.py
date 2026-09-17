@@ -4,7 +4,7 @@ import numpy as np
 
 # Step 2: Split into sentences
 def split_into_sentences(text):
-    sentences = re.split(r'(?<=[.!?])\s+', text)
+    sentences = re.split(r"(?<=[.!?])\s+", text)
     return [sentence.strip() for sentence in sentences if sentence.strip()]
 
 
@@ -14,13 +14,7 @@ def update_embedding(current_embedding, new_embedding, count):
 
 
 # Steps 3-14: Main chunking function
-def semantic_chunk(
-    text,
-    model,
-    similarity_threshold,
-    min_chunk_size,
-    max_chunk_size
-):
+def semantic_chunk(text, model, similarity_threshold, min_chunk_size, max_chunk_size):
     # Step 4: Get sentences
     sentences = split_into_sentences(text)
 
@@ -33,10 +27,7 @@ def semantic_chunk(
 
     # Step 6: Get embeddings
     # Use NumPy instead of PyTorch tensors to reduce temporary memory usage.
-    sentence_embeddings = model.encode(
-        sentences,
-        convert_to_numpy=True
-    )
+    sentence_embeddings = model.encode(sentences, convert_to_numpy=True)
 
     # Step 7: Initialize
     chunks = []
@@ -50,12 +41,8 @@ def semantic_chunk(
         sentence_embedding = sentence_embeddings[i]
 
         # Step 9: Calculate cosine similarity
-        similarity = (
-            np.dot(current_embedding, sentence_embedding)
-            / (
-                np.linalg.norm(current_embedding)
-                * np.linalg.norm(sentence_embedding)
-            )
+        similarity = np.dot(current_embedding, sentence_embedding) / (
+            np.linalg.norm(current_embedding) * np.linalg.norm(sentence_embedding)
         )
 
         # Step 10: Create candidate
@@ -63,26 +50,19 @@ def semantic_chunk(
         candidate_text = " ".join(candidate_chunk)
 
         # Step 11: Decision
-        if (
-            similarity >= similarity_threshold
-            and len(candidate_text) <= max_chunk_size
-        ):
+        if similarity >= similarity_threshold and len(candidate_text) <= max_chunk_size:
             # Keep together
             current_chunk = candidate_chunk
 
             current_embedding = update_embedding(
-                current_embedding,
-                sentence_embedding,
-                len(current_chunk) - 1
+                current_embedding, sentence_embedding, len(current_chunk) - 1
             )
 
         else:
             # Split
             if len(" ".join(current_chunk)) >= min_chunk_size:
 
-                chunks.append(
-                    " ".join(current_chunk)
-                )
+                chunks.append(" ".join(current_chunk))
 
                 current_chunk = [sentence]
                 current_embedding = sentence_embedding
@@ -92,16 +72,12 @@ def semantic_chunk(
                 current_chunk = candidate_chunk
 
                 current_embedding = update_embedding(
-                    current_embedding,
-                    sentence_embedding,
-                    len(current_chunk) - 1
+                    current_embedding, sentence_embedding, len(current_chunk) - 1
                 )
 
     # Step 13: Save last chunk
     if current_chunk:
-        chunks.append(
-            " ".join(current_chunk)
-        )
+        chunks.append(" ".join(current_chunk))
 
     # Step 14: Release temporary sentence embeddings
     del sentence_embeddings

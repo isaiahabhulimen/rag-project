@@ -22,16 +22,11 @@ class ObjectStorage:
             "REGION": storage_region,
         }
 
-        missing = [
-            name
-            for name, value in required.items()
-            if not value
-        ]
+        missing = [name for name, value in required.items() if not value]
 
         if missing:
             raise RuntimeError(
-                "Object storage is not configured. "
-                f"Missing: {', '.join(missing)}"
+                "Object storage is not configured. " f"Missing: {', '.join(missing)}"
             )
 
         self.bucket = storage_bucket
@@ -78,9 +73,7 @@ class ObjectStorage:
             Key=object_key,
         )
 
-        return json.loads(
-            response["Body"].read().decode("utf-8")
-        )
+        return json.loads(response["Body"].read().decode("utf-8"))
 
     def list_objects(self, prefix):
         keys = []
@@ -93,31 +86,16 @@ class ObjectStorage:
             }
 
             if continuation_token:
-                params["ContinuationToken"] = (
-                    continuation_token
-                )
+                params["ContinuationToken"] = continuation_token
 
-            response = self.client.list_objects_v2(
-                **params
-            )
+            response = self.client.list_objects_v2(**params)
 
-            keys.extend(
-                item["Key"]
-                for item in response.get(
-                    "Contents",
-                    []
-                )
-            )
+            keys.extend(item["Key"] for item in response.get("Contents", []))
 
-            if not response.get(
-                "IsTruncated",
-                False
-            ):
+            if not response.get("IsTruncated", False):
                 break
 
-            continuation_token = response.get(
-                "NextContinuationToken"
-            )
+            continuation_token = response.get("NextContinuationToken")
 
             if not continuation_token:
                 break

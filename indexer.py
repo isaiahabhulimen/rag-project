@@ -27,16 +27,12 @@ def index_book(
     text_index=0,
     image_index=0,
     checkpoint_callback=None,
-    checkpoint_interval=10
+    checkpoint_interval=10,
 ):
 
-    print(
-        f"\n===== Processing: {book_name} ====="
-    )
+    print(f"\n===== Processing: {book_name} =====")
 
-    file_hash = get_file_hash(
-        pdf_path
-    )
+    file_hash = get_file_hash(pdf_path)
 
     indexing_start = time.perf_counter()
 
@@ -57,10 +53,7 @@ def index_book(
 
             total_pages = len(pdf.pages)
 
-            print(
-                f"Total pages detected: "
-                f"{total_pages}"
-            )
+            print(f"Total pages detected: " f"{total_pages}")
 
             if start_page > total_pages:
 
@@ -72,26 +65,16 @@ def index_book(
 
                 if checkpoint_callback:
 
-                    checkpoint_callback(
-                        total_pages,
-                        text_index,
-                        image_index
-                    )
+                    checkpoint_callback(total_pages, text_index, image_index)
 
                 return {
                     "file_hash": file_hash,
                     "text_chunks": text_index,
                     "image_chunks": image_index,
-                    "indexing_time": (
-                        time.perf_counter()
-                        - indexing_start
-                    )
+                    "indexing_time": (time.perf_counter() - indexing_start),
                 }
 
-            for page_number, page in enumerate(
-                pdf.pages,
-                start=1
-            ):
+            for page_number, page in enumerate(pdf.pages, start=1):
 
                 if page_number < start_page:
                     continue
@@ -103,9 +86,7 @@ def index_book(
                 raw_text = page.extract_text()
 
                 if raw_text:
-                    page_text = clean_text(
-                        raw_text
-                    )
+                    page_text = clean_text(raw_text)
                 else:
                     page_text = ""
 
@@ -116,23 +97,18 @@ def index_book(
                         model,
                         semantic_chunk_threshold,
                         min_chunk_characters,
-                        max_chunk_characters
+                        max_chunk_characters,
                     )
 
                     for chunk in page_chunks:
 
-                        text_batch.append({
-                            "page": page_number,
-                            "text": chunk,
-                            "type": "text"
-                        })
+                        text_batch.append(
+                            {"page": page_number, "text": chunk, "type": "text"}
+                        )
 
                         total_text_chunks += 1
 
-                        if (
-                            len(text_batch)
-                            >= embedding_batch_size
-                        ):
+                        if len(text_batch) >= embedding_batch_size:
 
                             items = _embed_text_batch(
                                 text_batch,
@@ -140,27 +116,19 @@ def index_book(
                                 book_name,
                                 job_id,
                                 file_hash,
-                                text_index
+                                text_index,
                             )
 
                             text_index += len(items)
 
-                            text_persist_batch.extend(
-                                items
-                            )
+                            text_persist_batch.extend(items)
 
                             text_batch = []
 
-                            if (
-                                len(text_persist_batch)
-                                >= persistence_batch_size
-                            ):
+                            if len(text_persist_batch) >= persistence_batch_size:
 
                                 store_batch(
-                                    "text",
-                                    book_name,
-                                    file_hash,
-                                    text_persist_batch
+                                    "text", book_name, file_hash, text_persist_batch
                                 )
 
                                 print(
@@ -188,39 +156,25 @@ def index_book(
 
                     try:
 
-                        image_bytes = (
-                            image_data["stream"]
-                            .get_data()
+                        image_bytes = image_data["stream"].get_data()
+
+                        with open(image_path, "wb") as image_file:
+
+                            image_file.write(image_bytes)
+
+                        description = describe_image(image_path)
+
+                        image_batch.append(
+                            {
+                                "page": page_number,
+                                "text": ("[Image description: " f"{description}]"),
+                                "type": "image",
+                            }
                         )
-
-                        with open(
-                            image_path,
-                            "wb"
-                        ) as image_file:
-
-                            image_file.write(
-                                image_bytes
-                            )
-
-                        description = describe_image(
-                            image_path
-                        )
-
-                        image_batch.append({
-                            "page": page_number,
-                            "text": (
-                                "[Image description: "
-                                f"{description}]"
-                            ),
-                            "type": "image"
-                        })
 
                         total_image_chunks += 1
 
-                        if (
-                            len(image_batch)
-                            >= embedding_batch_size
-                        ):
+                        if len(image_batch) >= embedding_batch_size:
 
                             items = _embed_image_batch(
                                 image_batch,
@@ -228,27 +182,19 @@ def index_book(
                                 book_name,
                                 job_id,
                                 file_hash,
-                                image_index
+                                image_index,
                             )
 
                             image_index += len(items)
 
-                            image_persist_batch.extend(
-                                items
-                            )
+                            image_persist_batch.extend(items)
 
                             image_batch = []
 
-                            if (
-                                len(image_persist_batch)
-                                >= persistence_batch_size
-                            ):
+                            if len(image_persist_batch) >= persistence_batch_size:
 
                                 store_batch(
-                                    "image",
-                                    book_name,
-                                    file_hash,
-                                    image_persist_batch
+                                    "image", book_name, file_hash, image_persist_batch
                                 )
 
                                 print(
@@ -261,21 +207,14 @@ def index_book(
 
                     finally:
 
-                        if os.path.exists(
-                            image_path
-                        ):
-                            os.remove(
-                                image_path
-                            )
+                        if os.path.exists(image_path):
+                            os.remove(image_path)
 
                 # -------------------------
                 # PAGE PROGRESS
                 # -------------------------
 
-                elapsed = (
-                    time.perf_counter()
-                    - indexing_start
-                )
+                elapsed = time.perf_counter() - indexing_start
 
                 print(
                     f"Page {page_number}/{total_pages} | "
@@ -288,29 +227,19 @@ def index_book(
                 # CHECKPOINT
                 # -------------------------
 
-                if (
-                    checkpoint_callback
-                    and page_number % checkpoint_interval == 0
-                ):
+                if checkpoint_callback and page_number % checkpoint_interval == 0:
 
                     # Finish remaining embedding batches.
 
                     if text_batch:
 
                         items = _embed_text_batch(
-                            text_batch,
-                            model,
-                            book_name,
-                            job_id,
-                            file_hash,
-                            text_index
+                            text_batch, model, book_name, job_id, file_hash, text_index
                         )
 
                         text_index += len(items)
 
-                        text_persist_batch.extend(
-                            items
-                        )
+                        text_persist_batch.extend(items)
 
                         text_batch = []
 
@@ -322,14 +251,12 @@ def index_book(
                             book_name,
                             job_id,
                             file_hash,
-                            image_index
+                            image_index,
                         )
 
                         image_index += len(items)
 
-                        image_persist_batch.extend(
-                            items
-                        )
+                        image_persist_batch.extend(items)
 
                         image_batch = []
 
@@ -337,12 +264,7 @@ def index_book(
 
                     if text_persist_batch:
 
-                        store_batch(
-                            "text",
-                            book_name,
-                            file_hash,
-                            text_persist_batch
-                        )
+                        store_batch("text", book_name, file_hash, text_persist_batch)
 
                         print(
                             f"Checkpoint text flush: "
@@ -353,12 +275,7 @@ def index_book(
 
                     if image_persist_batch:
 
-                        store_batch(
-                            "image",
-                            book_name,
-                            file_hash,
-                            image_persist_batch
-                        )
+                        store_batch("image", book_name, file_hash, image_persist_batch)
 
                         print(
                             f"Checkpoint image flush: "
@@ -370,16 +287,9 @@ def index_book(
                     # Save checkpoint only after all work
                     # for this boundary has been persisted.
 
-                    checkpoint_callback(
-                        page_number,
-                        text_index,
-                        image_index
-                    )
+                    checkpoint_callback(page_number, text_index, image_index)
 
-                    print(
-                        f"Checkpoint saved: "
-                        f"page {page_number}"
-                    )
+                    print(f"Checkpoint saved: " f"page {page_number}")
 
             # -------------------------
             # FINAL TEXT EMBEDDING BATCH
@@ -388,19 +298,12 @@ def index_book(
             if text_batch:
 
                 items = _embed_text_batch(
-                    text_batch,
-                    model,
-                    book_name,
-                    job_id,
-                    file_hash,
-                    text_index
+                    text_batch, model, book_name, job_id, file_hash, text_index
                 )
 
                 text_index += len(items)
 
-                text_persist_batch.extend(
-                    items
-                )
+                text_persist_batch.extend(items)
 
             # -------------------------
             # FINAL IMAGE EMBEDDING BATCH
@@ -409,19 +312,12 @@ def index_book(
             if image_batch:
 
                 items = _embed_image_batch(
-                    image_batch,
-                    model,
-                    book_name,
-                    job_id,
-                    file_hash,
-                    image_index
+                    image_batch, model, book_name, job_id, file_hash, image_index
                 )
 
                 image_index += len(items)
 
-                image_persist_batch.extend(
-                    items
-                )
+                image_persist_batch.extend(items)
 
             # -------------------------
             # FINAL TEXT PERSISTENCE
@@ -429,16 +325,10 @@ def index_book(
 
             if text_persist_batch:
 
-                store_batch(
-                    "text",
-                    book_name,
-                    file_hash,
-                    text_persist_batch
-                )
+                store_batch("text", book_name, file_hash, text_persist_batch)
 
                 print(
-                    f"Persisted final text batch: "
-                    f"{len(text_persist_batch)} chunks"
+                    f"Persisted final text batch: " f"{len(text_persist_batch)} chunks"
                 )
 
             # -------------------------
@@ -447,12 +337,7 @@ def index_book(
 
             if image_persist_batch:
 
-                store_batch(
-                    "image",
-                    book_name,
-                    file_hash,
-                    image_persist_batch
-                )
+                store_batch("image", book_name, file_hash, image_persist_batch)
 
                 print(
                     f"Persisted final image batch: "
@@ -465,21 +350,11 @@ def index_book(
 
             if checkpoint_callback:
 
-                checkpoint_callback(
-                    total_pages,
-                    text_index,
-                    image_index
-                )
+                checkpoint_callback(total_pages, text_index, image_index)
 
-                print(
-                    f"Checkpoint saved: "
-                    f"page {total_pages}"
-                )
+                print(f"Checkpoint saved: " f"page {total_pages}")
 
-            indexing_time = (
-                time.perf_counter()
-                - indexing_start
-            )
+            indexing_time = time.perf_counter() - indexing_start
 
             print(
                 f"Indexed {text_index} "
@@ -488,123 +363,77 @@ def index_book(
                 f"image chunks"
             )
 
-            print(
-                f"Indexing completed in "
-                f"{indexing_time:.2f} seconds."
-            )
+            print(f"Indexing completed in " f"{indexing_time:.2f} seconds.")
 
             return {
                 "file_hash": file_hash,
                 "text_chunks": text_index,
                 "image_chunks": image_index,
-                "indexing_time": indexing_time
+                "indexing_time": indexing_time,
             }
 
     except Exception:
 
-        print(
-            f"Indexing failed for "
-            f"{book_name}"
-        )
+        print(f"Indexing failed for " f"{book_name}")
 
         raise
 
 
-def _embed_text_batch(
-    batch,
-    model,
-    book_name,
-    job_id,
-    file_hash,
-    start_index
-):
+def _embed_text_batch(batch, model, book_name, job_id, file_hash, start_index):
 
-    texts = [
-        chunk["text"]
-        for chunk in batch
-    ]
+    texts = [chunk["text"] for chunk in batch]
 
-    embeddings = model.encode(
-        texts,
-        batch_size=embedding_batch_size
-    ).tolist()
+    embeddings = model.encode(texts, batch_size=embedding_batch_size).tolist()
 
     items = []
 
-    for offset, (
-        chunk,
-        embedding
-    ) in enumerate(
-        zip(batch, embeddings)
-    ):
+    for offset, (chunk, embedding) in enumerate(zip(batch, embeddings)):
 
         index = start_index + offset
 
-        items.append({
-            "id": (
-                f"{book_name}_"
-                f"{job_id}_"
-                f"text_{index}"
-            ),
-            "document": chunk["text"],
-            "embedding": embedding,
-            "metadata": {
-                "page": chunk["page"],
-                "source": book_name,
-                "job_id": job_id,
-                "file_hash": file_hash,
-                "type": "text"
+        items.append(
+            {
+                "id": (f"{book_name}_" f"{job_id}_" f"text_{index}"),
+                "document": chunk["text"],
+                "embedding": embedding,
+                "metadata": {
+                    "page": chunk["page"],
+                    "source": book_name,
+                    "job_id": job_id,
+                    "file_hash": file_hash,
+                    "type": "text",
+                },
             }
-        })
+        )
 
     return items
 
 
-def _embed_image_batch(
-    batch,
-    model,
-    book_name,
-    job_id,
-    file_hash,
-    start_index
-):
+def _embed_image_batch(batch, model, book_name, job_id, file_hash, start_index):
 
-    texts = [
-        chunk["text"]
-        for chunk in batch
-    ]
+    texts = [chunk["text"] for chunk in batch]
 
-    embeddings = model.encode(
-        texts,
-        batch_size=embedding_batch_size
-    ).tolist()
+    embeddings = model.encode(texts, batch_size=embedding_batch_size).tolist()
 
     items = []
 
-    for offset, (
-        chunk,
-        embedding
-    ) in enumerate(
-        zip(batch, embeddings)
-    ):
+    for offset, (chunk, embedding) in enumerate(zip(batch, embeddings)):
 
         index = start_index + offset
 
-        items.append({
-            "id": (
-                f"{book_name}_"
-                f"{job_id}_"
-                f"image_{index}"
-            ),
-            "document": chunk["text"],
-            "embedding": embedding,
-            "metadata": {
-                "page": chunk["page"],
-                "source": book_name,
-                "job_id": job_id,
-                "file_hash": file_hash,
-                "type": "image"
+        items.append(
+            {
+                "id": (f"{book_name}_" f"{job_id}_" f"image_{index}"),
+                "document": chunk["text"],
+                "embedding": embedding,
+                "metadata": {
+                    "page": chunk["page"],
+                    "source": book_name,
+                    "job_id": job_id,
+                    "file_hash": file_hash,
+                    "type": "image",
+                },
             }
-        })
+        )
 
     return items

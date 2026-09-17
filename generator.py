@@ -1,11 +1,8 @@
-
 from config import llm_name
 from llm_client import chat
 
 
-
-
-def generate_answer(question, context):    
+def generate_answer(question, context):
     prompt = f"""
     Answer the question using only the provided context.
 
@@ -20,23 +17,17 @@ def generate_answer(question, context):
 
     answer:
     """
-    
-    
-
 
     response = chat(
         model=llm_name,
         messages=[
             {
                 "role": "system",
-                "content": "You answer questions using only the provided context. Never add information that is not present in the context."
+                "content": "You answer questions using only the provided context. Never add information that is not present in the context.",
             },
-            {
-                "role": "user",
-                "content": prompt
-            }
+            {"role": "user", "content": prompt},
         ],
-        temperature=0.2
+        temperature=0.2,
     )
     generated_answer = response.choices[0].message.content
 

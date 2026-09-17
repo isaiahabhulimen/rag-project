@@ -7,7 +7,7 @@ from config import (
     print_image_results,
     debug_keyword_results,
     debug_semantic_results,
-    retrieval_candidate_pool
+    retrieval_candidate_pool,
 )
 
 from app.exceptions import RetrievalError
@@ -16,25 +16,13 @@ from rank_bm25 import BM25Okapi
 
 
 def retrieve_chunks(
-    question,
-    search_all,
-    selected_book,
-    collection,
-    ids,
-    documents,
-    metadatas,
-    model
+    question, search_all, selected_book, collection, ids, documents, metadatas, model
 ):
     try:
-        question_embedding = model.encode(
-            question
-        ).tolist()
+        question_embedding = model.encode(question).tolist()
 
     except Exception as e:
-        raise RetrievalError(
-            "Failed to generate query embedding"
-        ) from e
-
+        raise RetrievalError("Failed to generate query embedding") from e
 
     question_words = question.lower().split()
 
@@ -53,15 +41,10 @@ def retrieve_chunks(
         "why",
         "how",
         "do",
-        "does"
+        "does",
     }
 
-    question_words = [
-        word
-        for word in question_words
-        if word not in stop_words
-    ]
-
+    question_words = [word for word in question_words if word not in stop_words]
 
     # -------------------------
     # BM25 SEARCH SCOPE
@@ -79,32 +62,15 @@ def retrieve_chunks(
         bm25_documents = []
         bm25_metadatas = []
 
-        for (
-            chunk_id,
-            document,
-            metadata
-        ) in zip(
-            ids,
-            documents,
-            metadatas
-        ):
+        for chunk_id, document, metadata in zip(ids, documents, metadatas):
 
-            if metadata.get(
-                "source"
-            ) == selected_book:
+            if metadata.get("source") == selected_book:
 
-                bm25_ids.append(
-                    chunk_id
-                )
+                bm25_ids.append(chunk_id)
 
-                bm25_documents.append(
-                    document
-                )
+                bm25_documents.append(document)
 
-                bm25_metadatas.append(
-                    metadata
-                )
-
+                bm25_metadatas.append(metadata)
 
     # -------------------------
     # BM25 RETRIEVAL
@@ -112,49 +78,27 @@ def retrieve_chunks(
 
     try:
 
-        tokenized_documents = [
-            document.lower().split()
-            for document in bm25_documents
-        ]
+        tokenized_documents = [document.lower().split() for document in bm25_documents]
 
-        bm25 = BM25Okapi(
-            tokenized_documents
-        )
+        bm25 = BM25Okapi(tokenized_documents)
 
-        bm25_scores = bm25.get_scores(
-            question_words
-        )
+        bm25_scores = bm25.get_scores(question_words)
 
     except Exception as e:
 
-        raise RetrievalError(
-            "Keyword retrieval failed"
-        ) from e
-
+        raise RetrievalError("Keyword retrieval failed") from e
 
     top_bm25 = sorted(
-        zip(
-            bm25_scores,
-            bm25_ids,
-            bm25_documents,
-            bm25_metadatas
-        ),
+        zip(bm25_scores, bm25_ids, bm25_documents, bm25_metadatas),
         key=lambda x: x[0],
-        reverse=True
+        reverse=True,
     )[:retrieval_candidate_pool]
-
 
     bm25_score_dict = {}
     chunk_metadata = {}
     chunk_text = {}
 
-
-    for (
-        score,
-        chunk_id,
-        document,
-        metadata
-    ) in top_bm25:
+    for score, chunk_id, document, metadata in top_bm25:
 
         bm25_score_dict[chunk_id] = score
 
@@ -162,17 +106,9 @@ def retrieve_chunks(
 
         chunk_text[chunk_id] = document
 
+    print("Question:", question)
 
-    print(
-        "Question:",
-        question
-    )
-
-    print(
-        "Question words:",
-        question_words
-    )
-
+    print("Question words:", question_words)
 
     # -------------------------
     # SEMANTIC RETRIEVAL
@@ -183,40 +119,23 @@ def retrieve_chunks(
         if search_all == "yes":
 
             results = collection.query(
-                query_embeddings=[
-                    question_embedding
-                ],
+                query_embeddings=[question_embedding],
                 n_results=retrieval_candidate_pool,
-                include=[
-                    "documents",
-                    "metadatas",
-                    "distances"
-                ]
+                include=["documents", "metadatas", "distances"],
             )
 
         else:
 
             results = collection.query(
-                query_embeddings=[
-                    question_embedding
-                ],
+                query_embeddings=[question_embedding],
                 n_results=retrieval_candidate_pool,
-                where={
-                    "source": selected_book
-                },
-                include=[
-                    "documents",
-                    "metadatas",
-                    "distances"
-                ]
+                where={"source": selected_book},
+                include=["documents", "metadatas", "distances"],
             )
 
     except Exception as e:
 
-        raise RetrievalError(
-            "Vector database retrieval failed"
-        ) from e
-
+        raise RetrievalError("Vector database retrieval failed") from e
 
     retrieved_chunks = results["documents"][0]
 
@@ -226,104 +145,54 @@ def retrieve_chunks(
 
     retrieved_ids = results["ids"][0]
 
-
     # -------------------------
     # SEMANTIC RESULT MAPPING
     # -------------------------
 
     semantic_scores = {}
 
-
-    for (
-        chunk_id,
-        chunk,
-        metadata,
-        distance
-    ) in zip(
-        retrieved_ids,
-        retrieved_chunks,
-        retrieved_metadata,
-        semantic_distances
+    for chunk_id, chunk, metadata, distance in zip(
+        retrieved_ids, retrieved_chunks, retrieved_metadata, semantic_distances
     ):
 
         chunk_metadata[chunk_id] = metadata
 
         chunk_text[chunk_id] = chunk
 
-
     # -------------------------
     # SEMANTIC RESULTS
     # -------------------------
 
-    print(
-        "\n==== Semantic Results ===="
-    )
+    print("\n==== Semantic Results ====")
 
-
-    for (
-        chunk_id,
-        chunk,
-        metadata,
-        distance
-    ) in list(
-        zip(
-            retrieved_ids,
-            retrieved_chunks,
-            retrieved_metadata,
-            semantic_distances
-        )
+    for chunk_id, chunk, metadata, distance in list(
+        zip(retrieved_ids, retrieved_chunks, retrieved_metadata, semantic_distances)
     )[:10]:
 
-        chunk_type = metadata.get(
-            "type",
-            "text"
-        )
+        chunk_type = metadata.get("type", "text")
 
         # Skip printing images if toggle is False
 
-        if (
-            chunk_type == "image"
-            and not print_image_results
-        ):
+        if chunk_type == "image" and not print_image_results:
             continue
 
-        print(
-            "Type:",
-            chunk_type.upper()
-        )
+        print("Type:", chunk_type.upper())
 
-        print(
-            "Distance:",
-            distance
-        )
+        print("Distance:", distance)
 
-        print(
-            "Source:",
-            metadata["source"]
-        )
+        print("Source:", metadata["source"])
 
-        print(
-            "Page:",
-            metadata["page"]
-        )
+        print("Page:", metadata["page"])
 
-        print(
-            chunk[:150]
-        )
+        print(chunk[:150])
 
-        print(
-            "------------------------"
-        )
+        print("------------------------")
 
-
-        semantic_scores[chunk_id] = (
-            1 / (1 + distance)
-        )
+        semantic_scores[chunk_id] = 1 / (1 + distance)
 
         chunk_metadata[chunk_id] = metadata
 
         chunk_text[chunk_id] = chunk
-
 
     # -------------------------
     # NORMALIZATION
@@ -331,13 +200,9 @@ def retrieve_chunks(
 
     if semantic_scores:
 
-        highest_semantic = max(
-            semantic_scores.values()
-        )
+        highest_semantic = max(semantic_scores.values())
 
-        lowest_semantic = min(
-            semantic_scores.values()
-        )
+        lowest_semantic = min(semantic_scores.values())
 
         if highest_semantic == lowest_semantic:
 
@@ -349,24 +214,15 @@ def retrieve_chunks(
 
             for chunk in semantic_scores:
 
-                semantic_scores[chunk] = (
-                    semantic_scores[chunk]
-                    - lowest_semantic
-                ) / (
-                    highest_semantic
-                    - lowest_semantic
+                semantic_scores[chunk] = (semantic_scores[chunk] - lowest_semantic) / (
+                    highest_semantic - lowest_semantic
                 )
-
 
     if bm25_score_dict:
 
-        highest_bm25 = max(
-            bm25_score_dict.values()
-        )
+        highest_bm25 = max(bm25_score_dict.values())
 
-        lowest_bm25 = min(
-            bm25_score_dict.values()
-        )
+        lowest_bm25 = min(bm25_score_dict.values())
 
         if highest_bm25 == lowest_bm25:
 
@@ -378,14 +234,9 @@ def retrieve_chunks(
 
             for chunk in bm25_score_dict:
 
-                bm25_score_dict[chunk] = (
-                    bm25_score_dict[chunk]
-                    - lowest_bm25
-                ) / (
-                    highest_bm25
-                    - lowest_bm25
+                bm25_score_dict[chunk] = (bm25_score_dict[chunk] - lowest_bm25) / (
+                    highest_bm25 - lowest_bm25
                 )
-
 
     # -------------------------
     # WEIGHTED FUSION
@@ -393,66 +244,33 @@ def retrieve_chunks(
 
     ranked_chunks = {}
 
-
     for chunk in semantic_scores:
 
-        ranked_chunks[chunk] = (
-            semantic_scores[chunk]
-            * semantic_weight
-        )
-
+        ranked_chunks[chunk] = semantic_scores[chunk] * semantic_weight
 
     for chunk in bm25_score_dict:
 
         if chunk in ranked_chunks:
 
-            ranked_chunks[chunk] += (
-                bm25_score_dict[chunk]
-                * keyword_weight
-            )
+            ranked_chunks[chunk] += bm25_score_dict[chunk] * keyword_weight
 
         else:
 
-            ranked_chunks[chunk] = (
-                bm25_score_dict[chunk]
-                * keyword_weight
-            )
+            ranked_chunks[chunk] = bm25_score_dict[chunk] * keyword_weight
 
+    combined_chunks = sorted(ranked_chunks, key=ranked_chunks.get, reverse=True)
 
-    combined_chunks = sorted(
-        ranked_chunks,
-        key=ranked_chunks.get,
-        reverse=True
-    )
+    print("\n==== Hybrid Ranking ====")
 
+    for chunk_id in combined_chunks[:debug_semantic_results]:
 
-    print(
-        "\n==== Hybrid Ranking ===="
-    )
+        print("Score:", ranked_chunks[chunk_id])
 
+        print("Source:", chunk_metadata[chunk_id]["source"])
 
-    for chunk_id in combined_chunks[
-        :debug_semantic_results
-    ]:
+        print(chunk_text[chunk_id][:150])
 
-        print(
-            "Score:",
-            ranked_chunks[chunk_id]
-        )
-
-        print(
-            "Source:",
-            chunk_metadata[chunk_id]["source"]
-        )
-
-        print(
-            chunk_text[chunk_id][:150]
-        )
-
-        print(
-            "---------------------"
-        )
-
+        print("---------------------")
 
     # -------------------------
     # MULTI-DOCUMENT BALANCING
@@ -514,16 +332,8 @@ def retrieve_chunks(
 
     """
 
-
     combined_chunks = [
-        chunk_text[chunk_id]
-        for chunk_id in combined_chunks[
-            :retrieval_results
-        ]
+        chunk_text[chunk_id] for chunk_id in combined_chunks[:retrieval_results]
     ]
 
-
-    return (
-        combined_chunks,
-        ranked_chunks
-    )
+    return (combined_chunks, ranked_chunks)
