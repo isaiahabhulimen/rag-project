@@ -19,7 +19,12 @@ from logger import logger
 from app.auth import verify_api_key
 from app.rate_limiter import check_rate_limit
 from storage import ObjectStorage
-from app.book_jobs import create_job, get_job, update_job, find_job_by_hash
+from app.book_jobs import (
+    create_job,
+    get_job,
+    update_job,
+    find_job_by_hash,
+)
 from config import worker_token
 
 app = FastAPI()
@@ -29,14 +34,18 @@ storage = ObjectStorage()
 @app.exception_handler(LLMError)
 def llm_error_handler(request, exc):
     logger.error(f"LLM error: {str(exc)}")
-    return JSONResponse(status_code=502, content={"detail": "LLM service unavailable"})
+    return JSONResponse(
+        status_code=502,
+        content={"detail": "LLM service unavailable"},
+    )
 
 
 @app.exception_handler(RetrievalError)
 def retrieval_error_handler(request, exc):
     logger.error(f"Retrieval error: {str(exc)} | " f"Cause: {repr(exc.__cause__)}")
     return JSONResponse(
-        status_code=503, content={"detail": "Retrieval service unavailable"}
+        status_code=503,
+        content={"detail": "Retrieval service unavailable"},
     )
 
 
@@ -49,6 +58,7 @@ def root():
 def health():
     try:
         document_count = app_context.text_collection.count()
+
         return {
             "status": "healthy",
             "database": "connected",
@@ -56,18 +66,26 @@ def health():
             "embedding_model": "loaded",
             "cross_encoder": "loaded",
         }
+
     except Exception as e:
         logger.error(f"Health check failed: {str(e)}")
-        raise HTTPException(status_code=503, detail="Service unavailable")
+        raise HTTPException(
+            status_code=503,
+            detail="Service unavailable",
+        )
 
 
 @app.post("/ask", response_model=QuestionResponse)
-def ask(request: QuestionRequest, authenticated: str = Depends(verify_api_key)):
+def ask(
+    request: QuestionRequest,
+    authenticated: str = Depends(verify_api_key),
+):
     logger.info(f"Question received | " f"length={len(request.question)}")
 
     if not check_rate_limit(authenticated):
         raise HTTPException(
-            status_code=429, detail="Rate limit exceeded. " "Try again later."
+            status_code=429,
+            detail="Rate limit exceeded. Try again later.",
         )
 
     answer = ask_question(
@@ -79,27 +97,39 @@ def ask(request: QuestionRequest, authenticated: str = Depends(verify_api_key)):
 
     logger.info("Answer generated successfully")
 
-    return {"question": request.question, "answer": answer}
+    return {
+        "question": request.question,
+        "answer": answer,
+    }
 
 
 @app.post("/books/upload")
 def upload_book(
-    file: UploadFile = File(...), authenticated: str = Depends(verify_api_key)
+    file: UploadFile = File(...),
+    authenticated: str = Depends(verify_api_key),
 ):
     if not file.filename:
-        raise HTTPException(status_code=400, detail="Filename is required")
+        raise HTTPException(
+            status_code=400,
+            detail="Filename is required",
+        )
 
     if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDFs are supported")
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDFs are supported",
+        )
 
     job_id = str(uuid.uuid4())
     temp_path = None
 
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=".pdf",
+        ) as temp_file:
 
             temp_path = temp_file.name
-
             hasher = hashlib.sha256()
 
             while True:
@@ -118,22 +148,53 @@ def upload_book(
         if existing_job:
             existing_status = existing_job.get("status")
 
+            # IMPORTANT:
+            # A completed job in object storage does not automatically
+            # mean this current API/Chroma instance has the book indexed.
+            #
+            # Verify the current Chroma database before returning
+            # "already_indexed".
+
             if existing_status == "completed":
-                logger.info(
-                    f"Duplicate book upload skipped | "
-                    f"filename={file.filename} | "
-                    f"file_hash={file_hash} | "
-                    f"existing_job={existing_job['job_id']}"
+                indexed_book = app_context.text_collection.get(
+                    where={"source": existing_job["filename"]},
+                    limit=1,
                 )
 
-                return {
-                    "job_id": existing_job["job_id"],
-                    "filename": existing_job["filename"],
-                    "status": "completed",
-                    "already_indexed": True,
-                }
+                indexed_ids = indexed_book.get("ids", [])
 
-            if existing_status in {"queued", "processing", "failed"}:
+                if indexed_ids:
+                    logger.info(
+                        f"Duplicate book upload skipped | "
+                        f"filename={file.filename} | "
+                        f"file_hash={file_hash} | "
+                        f"existing_job={existing_job['job_id']} | "
+                        f"current_index=present"
+                    )
+
+                    return {
+                        "job_id": existing_job["job_id"],
+                        "filename": existing_job["filename"],
+                        "status": "completed",
+                        "already_indexed": True,
+                    }
+
+                # The job is completed in object storage, but the
+                # current Chroma database does not contain the book.
+                #
+                # This can happen after moving the API to a new
+                # deployment with a new/empty persistent database.
+
+                logger.info(
+                    f"Completed job found but book is not indexed "
+                    f"in current database | "
+                    f"filename={file.filename} | "
+                    f"file_hash={file_hash} | "
+                    f"old_job={existing_job['job_id']} | "
+                    f"creating_new_job=True"
+                )
+
+            elif existing_status in {"queued", "processing"}:
                 logger.info(
                     f"Existing book job found | "
                     f"filename={file.filename} | "
@@ -149,9 +210,21 @@ def upload_book(
                     "already_indexed": False,
                 }
 
-        object_key = f"books/{file_hash}/" f"{file.filename}"
+            elif existing_status == "failed":
+                logger.info(
+                    f"Previous book job failed | "
+                    f"filename={file.filename} | "
+                    f"file_hash={file_hash} | "
+                    f"old_job={existing_job['job_id']} | "
+                    f"creating_new_job=True"
+                )
 
-        storage.upload_file(temp_path, object_key)
+        object_key = f"books/{file_hash}/{file.filename}"
+
+        storage.upload_file(
+            temp_path,
+            object_key,
+        )
 
         job = create_job(
             filename=file.filename,
@@ -177,7 +250,10 @@ def upload_book(
     except Exception as e:
         logger.error(f"Book upload failed | " f"job_id={job_id} | " f"error={str(e)}")
 
-        raise HTTPException(status_code=500, detail="Book upload failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Book upload failed",
+        )
 
     finally:
         if temp_path and os.path.exists(temp_path):
@@ -185,11 +261,17 @@ def upload_book(
 
 
 @app.get("/books/{job_id}")
-def book_status(job_id: str, authenticated: str = Depends(verify_api_key)):
+def book_status(
+    job_id: str,
+    authenticated: str = Depends(verify_api_key),
+):
     job = get_job(job_id)
 
     if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Job not found",
+        )
 
     return job
 
@@ -198,13 +280,17 @@ def book_status(job_id: str, authenticated: str = Depends(verify_api_key)):
 def index_batch(payload: dict):
     if not worker_token:
         raise HTTPException(
-            status_code=503, detail="Worker authentication is not configured"
+            status_code=503,
+            detail="Worker authentication is not configured",
         )
 
     token = payload.get("worker_token")
 
     if token != worker_token:
-        raise HTTPException(status_code=401, detail="Invalid worker credentials")
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid worker credentials",
+        )
 
     book_name = payload.get("book_name")
     file_hash = payload.get("file_hash")
@@ -212,16 +298,28 @@ def index_batch(payload: dict):
     items = payload.get("items", [])
 
     if not book_name:
-        raise HTTPException(status_code=400, detail="book_name is required")
+        raise HTTPException(
+            status_code=400,
+            detail="book_name is required",
+        )
 
     if not file_hash:
-        raise HTTPException(status_code=400, detail="file_hash is required")
+        raise HTTPException(
+            status_code=400,
+            detail="file_hash is required",
+        )
 
     if batch_type not in {"text", "image"}:
-        raise HTTPException(status_code=400, detail="Invalid batch_type")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid batch_type",
+        )
 
     if not items:
-        return {"status": "accepted", "count": 0}
+        return {
+            "status": "accepted",
+            "count": 0,
+        }
 
     collection = (
         app_context.text_collection
@@ -263,16 +361,23 @@ def index_batch(payload: dict):
 
 
 @app.delete("/internal/index/{book_name}")
-def delete_book_index(book_name: str, payload: dict):
+def delete_book_index(
+    book_name: str,
+    payload: dict,
+):
     if not worker_token:
         raise HTTPException(
-            status_code=503, detail="Worker authentication is not configured"
+            status_code=503,
+            detail="Worker authentication is not configured",
         )
 
     token = payload.get("worker_token")
 
     if token != worker_token:
-        raise HTTPException(status_code=401, detail="Invalid worker credentials")
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid worker credentials",
+        )
 
     app_context.text_collection.delete(where={"source": book_name})
 
