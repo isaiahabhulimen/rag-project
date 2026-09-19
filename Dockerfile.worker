@@ -1,5 +1,9 @@
 FROM python:3.11
 
+# Create non-root application user
+RUN groupadd --gid 1000 appuser && \
+    useradd --uid 1000 --gid 1000 --create-home appuser
+
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -16,10 +20,17 @@ RUN pip install --no-cache-dir \
 
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Download embedding model into the image
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2', device='cpu')"
 
 ENV HF_HUB_OFFLINE=1
 
 COPY . .
+
+# Give the application user access to application/model files
+RUN chown -R appuser:appuser /app /models
+
+# Run worker as non-root
+USER appuser
 
 CMD ["python", "ingest.py"]
