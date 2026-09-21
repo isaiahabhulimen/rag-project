@@ -1,4 +1,7 @@
-# Multi-Book RAG Question Answering System.
+# Multi-Book RAG Question Answering System
+
+🚀 **Live Demo / API:** https://rag-api.rag-project.blitz.cloud/docs
+📂 **Source Code:** https://github.com/isaiahabhulimen/rag-project
 
 A production-oriented Retrieval-Augmented Generation (RAG) system for asking questions across multiple books and generating answers grounded in retrieved document content.
 
@@ -11,7 +14,7 @@ The system goes beyond basic vector search by combining semantic retrieval, BM25
 The application allows users to:
 
 * Upload and index multiple PDF books
-* Ask questions about a specific book or across all indexed books
+* Ask questions across all indexed books
 * Retrieve relevant information using semantic and keyword search
 * Rerank retrieved candidates using a lightweight TinyBERT cross-encoder
 * Break complex questions into smaller queries when appropriate
@@ -54,7 +57,7 @@ LLM
 Grounded Answer
 ```
 
-### Why the multiple retrieval stages?
+### Why the Multiple Retrieval Stages?
 
 The system does not rely on a single similarity search.
 
@@ -99,7 +102,7 @@ Complex questions can be decomposed into smaller sub-questions, retrieved indepe
 
 The LLM receives retrieved document context rather than being asked to answer solely from its general knowledge.
 
-This keeps the generation stage tied to the information retrieved from the indexed books.
+This keeps the generation stage tied to information retrieved from the indexed books.
 
 ### Incremental Indexing
 
@@ -331,8 +334,8 @@ The language model is configurable through environment variables.
 ### 1. Clone the repository
 
 ```bash
-git clone <your-repository-url>
-cd <repository-folder>
+git clone https://github.com/isaiahabhulimen/rag-project.git
+cd rag-project
 ```
 
 ### 2. Create a virtual environment
@@ -551,7 +554,9 @@ The workflow:
 3. Builds the Docker image
 4. Publishes the image
 
-This provides an automated path from source-code changes to a deployable container image.
+The worker image is also built and published through the CI pipeline.
+
+This provides an automated path from source-code changes to deployable container images.
 
 ---
 
@@ -587,6 +592,7 @@ The project includes several mechanisms intended to make it more suitable for de
 * Automated tests
 * Dockerized deployment
 * Automated container builds
+* Separate API and worker processes
 
 These features were added progressively as the system moved beyond the initial RAG prototype.
 
@@ -664,3 +670,14 @@ Potential future improvements include:
 **Isaiah Abhulimen**
 
 This project was developed as a practical RAG engineering project, progressing from an initial prototype toward a production-oriented application.
+
+---
+
+## License
+
+**Copyright © 2026 Isaiah Abhulimen**
+**All Rights Reserved.**
+
+This repository is publicly available for viewing and evaluation purposes.
+
+No permission is granted to copy, modify, distribute, sublicense, publish, or use the source code or other materials from this repository for commercial purposes without prior written permission from the copyright holder.
