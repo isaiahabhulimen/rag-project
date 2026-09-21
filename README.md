@@ -1,4 +1,4 @@
-# Multi-Book RAG Question Answering System
+# Multi-Book RAG Question Answering System.
 
 A production-oriented Retrieval-Augmented Generation (RAG) system for asking questions across multiple books and generating answers grounded in retrieved document content.
 
